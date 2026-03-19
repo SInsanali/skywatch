@@ -1,17 +1,8 @@
 # Skywatch Configuration
 
-opensky:
-  poll_interval: 30          # seconds between API calls
-  timeout: 15                # HTTP request timeout
-  # Polling only happens when a viewer is connected (heartbeat-based).
-  # Global queries cost 4 credits/req. At 30s = ~480 credits/hour of viewing.
-  # With auth (4000 credits/day), that's ~8 hours of active viewing per day.
-  # Uncomment bbox to restrict to a region (1 credit for small bbox):
-  # bbox:
-  #   lat_min: 24.0
-  #   lat_max: 50.0
-  #   lon_min: -125.0
-  #   lon_max: -66.0
+polling:
+  interval: 15             # seconds between poll cycles
+  timeout: 30              # HTTP request timeout (global query is ~5MB)
 
 server:
   host: "0.0.0.0"

@@ -1,0 +1,14 @@
+services:
+  skywatch:
+    build: .
+    container_name: skywatch
+    ports:
+      - "8078:8078"
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8078/api/health"]
+      interval: 60s
+      retries: 3
+      start_period: 30s

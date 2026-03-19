@@ -21,14 +21,6 @@ rsync -avz --exclude '.git' --exclude '__pycache__' --exclude '.venv' \
     . ${SERVER}:${STAGING_DIR}/
 ssh ${SERVER} "sudo rsync -a --delete ${STAGING_DIR}/ ${REMOTE_DIR}/ && sudo chown -R ${REMOTE_USER}:${REMOTE_USER} ${REMOTE_DIR} && rm -rf ${STAGING_DIR}"
 
-# Set up OpenSky credentials as Podman secret
-CREDS_FILE="skywatch_api_credentials.json"
-if [ -f "${CREDS_FILE}" ]; then
-    echo "Setting up OpenSky credentials..."
-    ssh ${SERVER} "sudo su - ${REMOTE_USER} -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u) && podman secret rm opensky_credentials 2>/dev/null || true'"
-    cat ${CREDS_FILE} | ssh ${SERVER} "sudo su - ${REMOTE_USER} -c 'export XDG_RUNTIME_DIR=/run/user/\$(id -u) && podman secret create opensky_credentials -'"
-fi
-
 echo "Building container..."
 run_as_skywatch "cd ${REMOTE_DIR} && podman build -t ${IMAGE_NAME}:latest ."
 

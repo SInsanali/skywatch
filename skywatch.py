@@ -23,13 +23,13 @@ logging.basicConfig(
 )
 log = logging.getLogger("skywatch")
 
-OPENSKY_URL = "https://opensky-network.org/api/states/all"
-OPENSKY_TOKEN_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
+ADSBX_BASE = "https://api.adsb.lol/v2"
 ACDB_URL = "https://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz"
 AIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.csv"
 AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat"
 ACDB_REFRESH_HOURS = 24
 VIEWER_TIMEOUT = 60
+GLOBAL_QUERY_RADIUS = 10000  # nm — large enough to cover the entire globe
 
 
 class Config:
@@ -40,37 +40,9 @@ class Config:
         with open(path) as f:
             raw = yaml.safe_load(f)
 
-        opensky = raw.get("opensky", {})
-        self.poll_interval = opensky.get("poll_interval", 30)
-        self.timeout = opensky.get("timeout", 15)
-        bbox = opensky.get("bbox")
-        if bbox:
-            self.bbox = {
-                "lamin": bbox.get("lat_min"),
-                "lamax": bbox.get("lat_max"),
-                "lomin": bbox.get("lon_min"),
-                "lomax": bbox.get("lon_max"),
-            }
-        else:
-            self.bbox = None
-
-        self.client_id = None
-        self.client_secret = None
-        creds_paths = [
-            Path("/run/secrets/opensky_credentials"),
-            Path("/app/opensky_credentials.json"),
-            Path("skywatch_api_credentials.json"),
-        ]
-        for cp in creds_paths:
-            if cp.exists():
-                try:
-                    creds = json.loads(cp.read_text())
-                    self.client_id = creds.get("clientId")
-                    self.client_secret = creds.get("clientSecret")
-                    log.info("Loaded OpenSky credentials from %s", cp)
-                    break
-                except Exception:
-                    pass
+        polling = raw.get("polling", {})
+        self.poll_interval = polling.get("interval", 15)
+        self.timeout = polling.get("timeout", 20)
 
         server = raw.get("server", {})
         self.host = server.get("host", "0.0.0.0")
@@ -88,43 +60,6 @@ aircraft_db = {}
 airline_db = {}
 airports = []
 last_viewer_heartbeat = 0
-
-
-class OpenSkyAuth:
-    def __init__(self, client_id, client_secret):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.token = None
-        self.expires_at = 0
-
-    async def get_token(self, client):
-        if self.token and time.time() < self.expires_at - 30:
-            return self.token
-
-        resp = await client.post(OPENSKY_TOKEN_URL, data={
-            "grant_type": "client_credentials",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
-        })
-        resp.raise_for_status()
-        data = resp.json()
-
-        self.token = data["access_token"]
-        self.expires_at = time.time() + data.get("expires_in", 1800)
-        log.info("OpenSky token acquired, expires in %ds", data.get("expires_in", 0))
-        return self.token
-
-    async def auth_headers(self, client):
-        token = await self.get_token(client)
-        return {"Authorization": f"Bearer {token}"}
-
-
-opensky_auth = None
-if config.client_id and config.client_secret:
-    opensky_auth = OpenSkyAuth(config.client_id, config.client_secret)
-    log.info("OpenSky OAuth2 enabled (4000 credits/day)")
-else:
-    log.warning("No OpenSky credentials found, using anonymous access (400 credits/day)")
 
 
 def has_active_viewer():
@@ -147,7 +82,6 @@ async def load_airlines():
             name = parts[1].strip('"')
             icao = parts[4].strip('"')
             country = parts[6].strip('"')
-            active = parts[7].strip('"')
             if not icao or icao == "\\N" or icao == "-":
                 continue
             db[icao] = {"name": name, "country": country}
@@ -183,12 +117,8 @@ async def load_airports():
                 continue
             size = "L" if ap_type == "large_airport" else "M" if ap_type == "medium_airport" else "S"
             result.append({
-                "iata": iata,
-                "icao": icao,
-                "name": row.get("name", ""),
-                "lat": lat,
-                "lon": lon,
-                "size": size,
+                "iata": iata, "icao": icao,
+                "name": row.get("name", ""), "lat": lat, "lon": lon, "size": size,
             })
 
         airports = result
@@ -206,7 +136,6 @@ async def load_aircraft_db():
             resp.raise_for_status()
 
         raw = gzip.decompress(resp.content).decode("utf-8")
-
         db = {}
         for line in raw.splitlines():
             if not line.strip():
@@ -250,47 +179,110 @@ def decode_airline(callsign):
     return None, None
 
 
-def enrich(aircraft):
-    info = aircraft_db.get(aircraft["icao24"])
-    if info:
-        aircraft.update(info)
-
-    airline_name, flight_id = decode_airline(aircraft.get("callsign"))
-    if airline_name:
-        aircraft["airline"] = airline_name
-        if not aircraft.get("operator"):
-            aircraft["operator"] = airline_name
-    if flight_id:
-        aircraft["flight"] = flight_id
-
-    return aircraft
-
-
-def parse_aircraft(states):
+def parse_v2_aircraft(ac_list):
+    """Parse airplanes.live v2 format into our standard format."""
     aircraft = []
-    for s in states:
-        if s[6] is None or s[5] is None:
+    for a in ac_list:
+        lat = a.get("lat")
+        lon = a.get("lon")
+        if lat is None or lon is None:
             continue
-        callsign = (s[1] or "").strip()
+
+        hex_code = (a.get("hex") or "").strip().lower()
+        if not hex_code:
+            continue
+
+        callsign = (a.get("flight") or "").strip() or None
+        alt_baro = a.get("alt_baro")
+        if alt_baro == "ground":
+            alt_baro = 0
+            on_ground = True
+        else:
+            on_ground = alt_baro is not None and alt_baro <= 0
+
+        # Convert feet to meters for consistency with frontend expectations
+        baro_m = round(alt_baro * 0.3048, 1) if isinstance(alt_baro, (int, float)) else None
+        geo_alt = a.get("alt_geom")
+        geo_m = round(geo_alt * 0.3048, 1) if isinstance(geo_alt, (int, float)) else None
+
+        gs = a.get("gs")
+        velocity_ms = round(gs * 0.514444, 2) if gs is not None else None
+
+        track = a.get("track")
+        baro_rate = a.get("baro_rate")
+        vr_ms = round(baro_rate * 0.00508, 2) if baro_rate is not None else None
+
         ac = {
-            "icao24": s[0],
-            "callsign": callsign if callsign else None,
-            "origin_country": s[2],
-            "latitude": s[6],
-            "longitude": s[5],
-            "baro_altitude": s[7],
-            "on_ground": s[8],
-            "velocity": s[9],
-            "true_track": s[10],
-            "vertical_rate": s[11],
-            "geo_altitude": s[13],
-            "squawk": s[14],
+            "icao24": hex_code,
+            "callsign": callsign,
+            "origin_country": None,
+            "latitude": lat,
+            "longitude": lon,
+            "baro_altitude": baro_m,
+            "on_ground": on_ground,
+            "velocity": velocity_ms,
+            "true_track": track,
+            "vertical_rate": vr_ms,
+            "geo_altitude": geo_m,
+            "squawk": a.get("squawk"),
         }
-        aircraft.append(enrich(ac))
+
+        # v2 has richer fields we can pass through
+        if a.get("ias") is not None:
+            ac["ias"] = a["ias"]
+        if a.get("tas") is not None:
+            ac["tas"] = a["tas"]
+        if a.get("mach") is not None:
+            ac["mach"] = a["mach"]
+        if a.get("wd") is not None:
+            ac["wind_dir"] = a["wd"]
+        if a.get("ws") is not None:
+            ac["wind_speed"] = a["ws"]
+        if a.get("oat") is not None:
+            ac["oat"] = a["oat"]
+        if a.get("category") is not None:
+            ac["category"] = a["category"]
+        if a.get("nav_altitude_mcp") is not None:
+            ac["nav_alt"] = a["nav_altitude_mcp"]
+        if a.get("emergency") and a["emergency"] != "none":
+            ac["emergency"] = a["emergency"]
+
+        # Use v2's built-in reg/type if available, fall back to our DB
+        if a.get("r"):
+            ac["reg"] = a["r"]
+        if a.get("t"):
+            ac["type"] = a["t"]
+        if a.get("dbFlags"):
+            ac["mil"] = bool(a["dbFlags"] & 1)
+
+        # Enrich from our databases
+        db_info = aircraft_db.get(hex_code)
+        if db_info:
+            if not ac.get("reg"):
+                ac["reg"] = db_info.get("reg")
+            if not ac.get("type"):
+                ac["type"] = db_info.get("type")
+            if not ac.get("model"):
+                ac["model"] = db_info.get("model")
+            ac["operator"] = db_info.get("operator")
+            if not ac.get("year"):
+                ac["year"] = db_info.get("year")
+            if "mil" not in ac:
+                ac["mil"] = db_info.get("mil", False)
+
+        airline_name, flight_id = decode_airline(callsign)
+        if airline_name:
+            ac["airline"] = airline_name
+            if not ac.get("operator"):
+                ac["operator"] = airline_name
+        if flight_id:
+            ac["flight"] = flight_id
+
+        aircraft.append(ac)
     return aircraft
 
 
-async def poll_opensky():
+async def poll_aircraft():
     interval = config.poll_interval
     was_idle = True
 
@@ -298,55 +290,38 @@ async def poll_opensky():
         while True:
             if not has_active_viewer():
                 if not was_idle:
-                    log.info("No active viewers, pausing OpenSky polling")
+                    log.info("No active viewers, pausing polling")
                     was_idle = True
                 await asyncio.sleep(5)
                 continue
 
             if was_idle:
-                log.info("Viewer connected, resuming OpenSky polling")
+                log.info("Viewer connected, resuming polling")
                 was_idle = False
 
             try:
-                headers = {}
-                if opensky_auth:
-                    headers = await opensky_auth.auth_headers(client)
-
-                params = config.bbox if config.bbox else {}
-                resp = await client.get(OPENSKY_URL, params=params, headers=headers)
+                url = f"{ADSBX_BASE}/point/0/0/{GLOBAL_QUERY_RADIUS}"
+                resp = await client.get(url)
 
                 if resp.status_code == 429:
-                    retry_after = resp.headers.get("X-Rate-Limit-Retry-After-Seconds")
-                    if retry_after:
-                        wait = int(retry_after) + 5
-                    else:
-                        wait = min(interval * 4, 600)
-                    remaining = resp.headers.get("X-Rate-Limit-Remaining", "?")
-                    log.warning("Rate limited (remaining: %s), waiting %ds", remaining, wait)
-                    await asyncio.sleep(wait)
+                    log.warning("Rate limited by airplanes.live")
+                    await asyncio.sleep(10)
+                    continue
+                if resp.status_code != 200:
+                    log.error("HTTP %d from airplanes.live", resp.status_code)
+                    await asyncio.sleep(interval)
                     continue
 
-                resp.raise_for_status()
                 data = resp.json()
+                aircraft = parse_v2_aircraft(data.get("ac") or [])
 
-                remaining = resp.headers.get("X-Rate-Limit-Remaining")
-                states = data.get("states") or []
-                aircraft_state["aircraft"] = parse_aircraft(states)
-                aircraft_state["timestamp"] = data.get("time", int(time.time()))
+                aircraft_state["aircraft"] = aircraft
+                aircraft_state["timestamp"] = int(time.time())
 
-                credits_left = int(remaining) if remaining and remaining.isdigit() else None
-                if credits_left is not None and credits_left < 500:
-                    log.warning("Low credits: %d remaining", credits_left)
-                elif credits_left is not None and credits_left < 100:
-                    log.error("Credits nearly exhausted: %d remaining", credits_left)
+                log.info("Tracking %d aircraft", len(aircraft))
 
-                log.info("Tracking %d aircraft (credits remaining: %s)",
-                         len(aircraft_state["aircraft"]), remaining or "n/a")
-
-            except httpx.HTTPStatusError as e:
-                log.error("HTTP %d from OpenSky", e.response.status_code)
-            except (httpx.RequestError, Exception) as e:
-                log.error("OpenSky poll failed: %s", e)
+            except Exception as e:
+                log.error("Poll failed: %s", e)
 
             await asyncio.sleep(interval)
 
@@ -356,8 +331,8 @@ async def lifespan(app):
     await load_airports()
     await load_airlines()
     db_task = asyncio.create_task(refresh_aircraft_db())
-    poll_task = asyncio.create_task(poll_opensky())
-    log.info("Skywatch started on port %d", config.port)
+    poll_task = asyncio.create_task(poll_aircraft())
+    log.info("Skywatch started on port %d (source: airplanes.live)", config.port)
     yield
     poll_task.cancel()
     db_task.cancel()
@@ -387,6 +362,7 @@ async def health():
     age = time.time() - aircraft_state["timestamp"] if aircraft_state["timestamp"] else None
     return {
         "status": "ok",
+        "source": "airplanes.live",
         "aircraft_count": len(aircraft_state["aircraft"]),
         "data_age_seconds": round(age) if age else None,
         "airports_loaded": len(airports),

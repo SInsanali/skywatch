@@ -14,7 +14,7 @@ UserNS=keep-id
 Environment=TZ=America/Denver
 AutoUpdate=local
 LogDriver=journald
-Secret=opensky_credentials,target=/run/secrets/opensky_credentials
+# No API credentials needed (airplanes.live is free/open)
 HealthCmd=curl -f http://localhost:8078/api/health || exit 1
 HealthInterval=60s
 HealthRetries=3

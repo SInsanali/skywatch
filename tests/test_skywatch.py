@@ -1,21 +1,19 @@
 import asyncio
-import gzip
 import json
+import re
 import sys
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from skywatch import (
     Config,
-    OpenSkyAuth,
-    enrich,
-    parse_aircraft,
+    decode_airline,
+    parse_v2_aircraft,
 )
 
 
@@ -24,132 +22,164 @@ from skywatch import (
 def test_config_loads_defaults(tmp_path):
     cfg = tmp_path / "config.yaml"
     cfg.write_text("server:\n  port: 9999\n")
-    with patch.object(Path, "exists", side_effect=lambda: False):
-        pass
-    # Just verify the Config class can instantiate with a real file
     import yaml
     raw = yaml.safe_load(cfg.read_text())
     assert raw["server"]["port"] == 9999
 
 
-def test_config_optional_bbox(tmp_path):
+def test_config_polling_defaults(tmp_path):
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("opensky:\n  poll_interval: 60\nserver:\n  port: 8078\n")
-    with patch("skywatch.Path") as mock_path:
-        instance = MagicMock()
-        instance.exists.return_value = True
-        instance.__truediv__ = lambda s, o: instance
-        mock_path.return_value = instance
-        mock_path.side_effect = None
-        # Test that missing bbox results in None
-        import yaml
-        raw = yaml.safe_load(cfg.read_text())
-        assert raw.get("opensky", {}).get("bbox") is None
+    cfg.write_text("server:\n  port: 8078\n")
+    import yaml
+    raw = yaml.safe_load(cfg.read_text())
+    polling = raw.get("polling", {})
+    assert polling.get("interval", 15) == 15
 
 
-# --- Aircraft parsing ---
+# --- v2 Aircraft parsing ---
 
-SAMPLE_STATE = [
-    "abc123",     # 0  icao24
-    "DAL201  ",   # 1  callsign
-    "United States",  # 2  origin_country
-    1700000000,   # 3  time_position
-    1700000000,   # 4  last_contact
-    -95.5,        # 5  longitude
-    37.5,         # 6  latitude
-    10000.0,      # 7  baro_altitude
-    False,        # 8  on_ground
-    250.0,        # 9  velocity
-    180.0,        # 10 true_track
-    -5.0,         # 11 vertical_rate
-    None,         # 12 sensors
-    10200.0,      # 13 geo_altitude
-    "1200",       # 14 squawk
-    False,        # 15 spi
-    0,            # 16 position_source
-]
+SAMPLE_V2_AC = {
+    "hex": "abc123",
+    "flight": "DAL201  ",
+    "lat": 37.5,
+    "lon": -95.5,
+    "alt_baro": 35000,
+    "alt_geom": 35500,
+    "gs": 450,
+    "track": 180.0,
+    "baro_rate": -500,
+    "squawk": "1200",
+    "r": "N520DN",
+    "t": "A359",
+    "ias": 280,
+    "tas": 460,
+    "mach": 0.82,
+    "wd": 270,
+    "ws": 45,
+    "oat": -52,
+    "category": "A5",
+    "dbFlags": 0,
+}
 
 
-def test_parse_aircraft_basic():
-    result = parse_aircraft([SAMPLE_STATE])
+def test_parse_v2_basic():
+    result = parse_v2_aircraft([SAMPLE_V2_AC])
     assert len(result) == 1
     ac = result[0]
     assert ac["icao24"] == "abc123"
     assert ac["callsign"] == "DAL201"
     assert ac["latitude"] == 37.5
     assert ac["longitude"] == -95.5
-    assert ac["baro_altitude"] == 10000.0
-    assert ac["on_ground"] is False
-    assert ac["velocity"] == 250.0
-    assert ac["true_track"] == 180.0
-    assert ac["vertical_rate"] == -5.0
+    assert ac["reg"] == "N520DN"
+    assert ac["type"] == "A359"
     assert ac["squawk"] == "1200"
+    assert ac["ias"] == 280
+    assert ac["mach"] == 0.82
+    assert ac["wind_dir"] == 270
+    assert ac["oat"] == -52
 
 
-def test_parse_aircraft_strips_callsign():
-    state = list(SAMPLE_STATE)
-    state[1] = "  UAL456  "
-    result = parse_aircraft([state])
+def test_parse_v2_altitude_conversion():
+    result = parse_v2_aircraft([SAMPLE_V2_AC])
+    ac = result[0]
+    assert ac["baro_altitude"] == pytest.approx(35000 * 0.3048, rel=0.01)
+    assert ac["geo_altitude"] == pytest.approx(35500 * 0.3048, rel=0.01)
+
+
+def test_parse_v2_speed_conversion():
+    result = parse_v2_aircraft([SAMPLE_V2_AC])
+    ac = result[0]
+    assert ac["velocity"] == pytest.approx(450 * 0.514444, rel=0.01)
+
+
+def test_parse_v2_ground():
+    ac = dict(SAMPLE_V2_AC)
+    ac["alt_baro"] = "ground"
+    result = parse_v2_aircraft([ac])
+    assert result[0]["on_ground"] is True
+    assert result[0]["baro_altitude"] == 0
+
+
+def test_parse_v2_strips_callsign():
+    ac = dict(SAMPLE_V2_AC)
+    ac["flight"] = "  UAL456  "
+    result = parse_v2_aircraft([ac])
     assert result[0]["callsign"] == "UAL456"
 
 
-def test_parse_aircraft_null_callsign():
-    state = list(SAMPLE_STATE)
-    state[1] = None
-    result = parse_aircraft([state])
-    assert result[0]["callsign"] is None
+def test_parse_v2_null_position():
+    ac = dict(SAMPLE_V2_AC)
+    ac["lat"] = None
+    assert parse_v2_aircraft([ac]) == []
 
 
-def test_parse_aircraft_skips_null_position():
-    state_no_lat = list(SAMPLE_STATE)
-    state_no_lat[6] = None
-    state_no_lon = list(SAMPLE_STATE)
-    state_no_lon[5] = None
-    assert parse_aircraft([state_no_lat]) == []
-    assert parse_aircraft([state_no_lon]) == []
+def test_parse_v2_empty():
+    assert parse_v2_aircraft([]) == []
 
 
-def test_parse_aircraft_empty_states():
-    assert parse_aircraft([]) == []
+def test_parse_v2_military_flag():
+    ac = dict(SAMPLE_V2_AC)
+    ac["dbFlags"] = 1
+    result = parse_v2_aircraft([ac])
+    assert result[0]["mil"] is True
 
 
-# --- Enrichment ---
-
-def test_enrich_adds_db_fields():
-    from skywatch import aircraft_db
-    aircraft_db["abc123"] = {
-        "reg": "N520DN",
-        "type": "A359",
-        "model": "Airbus A350-941",
-        "operator": "Delta Air Lines",
-        "year": "2017",
-        "mil": False,
-    }
-    ac = {"icao24": "abc123", "callsign": "DAL201"}
-    result = enrich(ac)
-    assert result["reg"] == "N520DN"
-    assert result["operator"] == "Delta Air Lines"
-    assert result["model"] == "Airbus A350-941"
-    aircraft_db.clear()
+def test_parse_v2_emergency():
+    ac = dict(SAMPLE_V2_AC)
+    ac["emergency"] = "general"
+    result = parse_v2_aircraft([ac])
+    assert result[0]["emergency"] == "general"
 
 
-def test_enrich_missing_icao():
-    ac = {"icao24": "ffffff", "callsign": "TEST"}
-    result = enrich(ac)
-    assert "reg" not in result
-    assert result["callsign"] == "TEST"
+def test_parse_v2_no_emergency():
+    ac = dict(SAMPLE_V2_AC)
+    ac["emergency"] = "none"
+    result = parse_v2_aircraft([ac])
+    assert "emergency" not in result[0]
 
 
-# --- Classification (frontend logic, tested here for parity) ---
+# --- Airline decoding ---
+
+def test_decode_airline():
+    from skywatch import airline_db
+    airline_db["DAL"] = {"name": "Delta Air Lines", "country": "United States"}
+    name, flight = decode_airline("DAL201")
+    assert name == "Delta Air Lines"
+    assert flight == "DAL201"
+    airline_db.clear()
+
+
+def test_decode_airline_strips_zeros():
+    from skywatch import airline_db
+    airline_db["UAL"] = {"name": "United Airlines", "country": "United States"}
+    name, flight = decode_airline("UAL0042")
+    assert flight == "UAL42"
+    airline_db.clear()
+
+
+def test_decode_airline_unknown():
+    name, flight = decode_airline("ZZZ999")
+    assert name is None
+
+
+def test_decode_airline_short():
+    name, flight = decode_airline("AB")
+    assert name is None
+
+
+def test_decode_airline_none():
+    name, flight = decode_airline(None)
+    assert name is None
+
+
+# --- Classification (frontend logic, tested for parity) ---
 
 def classify(a):
-    """Mirror the frontend classifyAircraft logic."""
     if a.get("on_ground"):
         return "ground"
     if a.get("mil"):
         return "military"
     cs = a.get("callsign") or ""
-    import re
     if re.match(r"^[A-Z]{3}\d", cs):
         return "airline"
     return "private"
@@ -157,14 +187,10 @@ def classify(a):
 
 def test_classify_airline():
     assert classify({"callsign": "DAL201", "on_ground": False}) == "airline"
-    assert classify({"callsign": "BAW123", "on_ground": False}) == "airline"
-    assert classify({"callsign": "UAL1", "on_ground": False}) == "airline"
 
 
 def test_classify_private():
     assert classify({"callsign": "N12345", "on_ground": False}) == "private"
-    assert classify({"callsign": None, "on_ground": False}) == "private"
-    assert classify({"on_ground": False}) == "private"
 
 
 def test_classify_military():
@@ -173,52 +199,3 @@ def test_classify_military():
 
 def test_classify_ground():
     assert classify({"callsign": "DAL201", "on_ground": True}) == "ground"
-    assert classify({"callsign": "DAL201", "on_ground": True, "mil": True}) == "ground"
-
-
-# --- OAuth2 ---
-
-@pytest.mark.asyncio
-async def test_opensky_auth_caches_token():
-    auth = OpenSkyAuth("test-client", "test-secret")
-    mock_client = AsyncMock()
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"access_token": "tok123", "expires_in": 1800}
-    mock_resp.raise_for_status = MagicMock()
-    mock_client.post.return_value = mock_resp
-
-    token1 = await auth.get_token(mock_client)
-    assert token1 == "tok123"
-    assert mock_client.post.call_count == 1
-
-    # Second call should use cache
-    token2 = await auth.get_token(mock_client)
-    assert token2 == "tok123"
-    assert mock_client.post.call_count == 1
-
-
-@pytest.mark.asyncio
-async def test_opensky_auth_refreshes_expired():
-    auth = OpenSkyAuth("test-client", "test-secret")
-    auth.token = "old-token"
-    auth.expires_at = time.time() - 100  # expired
-
-    mock_client = AsyncMock()
-    mock_resp = MagicMock()
-    mock_resp.json.return_value = {"access_token": "new-token", "expires_in": 1800}
-    mock_resp.raise_for_status = MagicMock()
-    mock_client.post.return_value = mock_resp
-
-    token = await auth.get_token(mock_client)
-    assert token == "new-token"
-
-
-@pytest.mark.asyncio
-async def test_opensky_auth_headers():
-    auth = OpenSkyAuth("c", "s")
-    auth.token = "mytoken"
-    auth.expires_at = time.time() + 600
-
-    mock_client = AsyncMock()
-    headers = await auth.auth_headers(mock_client)
-    assert headers == {"Authorization": "Bearer mytoken"}

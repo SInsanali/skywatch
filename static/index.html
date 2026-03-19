@@ -532,12 +532,10 @@
                     el.addEventListener('click', () => {
                         const d = acData.get(el.dataset.icao);
                         if (!d) return;
-                        const m = markers.get(el.dataset.icao);
-                        if (m) {
-                            map.setView([d.latitude, d.longitude], 8);
-                            if (!map.hasLayer(m)) map.addLayer(m);
-                            m.openPopup();
-                        }
+                        map.setView([d.latitude, d.longitude], 8);
+                        acLayer._popup.setLatLng([d.latitude, d.longitude])
+                            .setContent(popupContent(d, d._type))
+                            .openOn(map);
                     });
                 });
             } else {
@@ -692,10 +690,10 @@
         loadAirports();
 
         // --- Aircraft ---
-        const markers = new Map(), acData = new Map();
+        const acData = new Map();
         const statusEl = document.getElementById('status');
 
-        // Helicopter type codes
+        // Type classification sets
         const heliTypes = new Set([
             'EC35','EC45','EC55','EC30','EC20','EC75','H135','H145','H160','H175','H215','H225',
             'AS50','AS55','AS32','AS65','AS30','A109','A119','A139','A169','A189',
@@ -705,7 +703,6 @@
             'NH90','LYNX','PUMA','TIGR','GAZL','K32','KA52','BK17','MD52','MD60','MD90','EXPL',
             'COUG','DAUF','LAMA','ALO2','ALO3','CABR','RAVE','EXEC','GUIM','SW4',
         ]);
-        // Light/GA single-engine prop types
         const lightTypes = new Set([
             'C150','C152','C172','C177','C180','C182','C185','C205','C206','C207','C210','C337',
             'PA18','PA22','PA23','PA24','PA25','PA28','PA30','PA31','PA32','PA34','PA38','PA44','PA46',
@@ -713,7 +710,6 @@
             'SR20','SR22','TBM7','TBM8','TBM9','P28A','P28B','P28R','P28T','P32R','P32T','M20T','M20J','M20K',
             'COLT','J3','CHET',
         ]);
-        // Jet (wide-body)
         const widebodyTypes = new Set([
             'A332','A333','A338','A339','A342','A343','A345','A346','A359','A35K',
             'A380','A388','A3ST',
@@ -722,12 +718,7 @@
             'MD11','DC10','IL96','IL86','A124','C5M','C17',
         ]);
 
-        const svgPlane = (c) => `<path fill="${c}" d="M16 1.5 L14.5 12 L5 17 L5 19 L14.5 16 L14.5 26 L11 28.5 L11 30 L16 28 L21 30 L21 28.5 L17.5 26 L17.5 16 L27 19 L27 17 L17.5 12 Z"/>`;
-        const svgWidebody = (c) => `<path fill="${c}" d="M16 1 L13.5 12 L3 17 L3 19.5 L13.5 16.5 L13.5 26 L10 28.5 L10 30.5 L16 28 L22 30.5 L22 28.5 L18.5 26 L18.5 16.5 L29 19.5 L29 17 L18.5 12 Z"/>`;
-        const svgHeli = (c) => `<path fill="${c}" d="M15 6 L15 14 L8 14 L8 16 L15 16 L15 17 L12 20 L10 24 L10 26 L14 22 L15 20 L15 28 L17 28 L17 20 L18 22 L22 26 L22 24 L20 20 L17 17 L17 16 L24 16 L24 14 L17 14 L17 6 Z M10 5 L22 5 L22 7 L10 7 Z"/>`;
-        const svgLight = (c) => `<path fill="${c}" d="M16 4 L15 14 L7 18 L7 19.5 L15 17 L15 25 L12 27 L12 28.5 L16 27 L20 28.5 L20 27 L17 25 L17 17 L25 19.5 L25 18 L17 14 Z"/>`;
-
-        function getAircraftShape(typeCode) {
+        function getShape(typeCode) {
             if (!typeCode) return 'plane';
             const t = typeCode.toUpperCase();
             if (heliTypes.has(t)) return 'heli';
@@ -736,33 +727,237 @@
             return 'plane';
         }
 
-        function makeIcon(heading, acType, typeCode) {
-            const h = heading || 0;
-            const c = typeColors[acType] || '#f0c040';
-            const shape = getAircraftShape(typeCode);
-            const sz = acType === 'ground' ? 12 : shape === 'widebody' ? 20 : shape === 'heli' ? 18 : shape === 'light' ? 14 : 18;
-            const svgFn = shape === 'heli' ? svgHeli : shape === 'widebody' ? svgWidebody : shape === 'light' ? svgLight : svgPlane;
-            return L.divIcon({
-                className: 'aircraft-icon',
-                html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="${sz}" height="${sz}" style="transform:rotate(${h}deg)">
-                    ${svgFn(c)}
-                </svg>`,
-                iconSize: [sz, sz], iconAnchor: [sz/2, sz/2],
-            });
-        }
-
         const ftFmt = new Intl.NumberFormat('en-US');
         function metersToFeet(m) { return m != null ? Math.round(m * 3.28084) : null; }
         function msToKnots(ms) { return ms != null ? Math.round(ms * 1.94384) : null; }
 
+        function shouldShow(t) { return filters[t] ? filters[t].checked : true; }
+
+        function shouldDisplay(d) {
+            if (!shouldShow(d._type)) return false;
+            if (!inRegion(d)) return false;
+            if (!matchesSearch(d)) return false;
+            if (activeTypeFilter && d.type !== activeTypeFilter) return false;
+            return true;
+        }
+
+        // --- Aircraft shapes as Path2D (original SVG paths, centered at 0,0, 32-unit viewbox) ---
+        function buildPath(coords) {
+            const p = new Path2D();
+            p.moveTo(coords[0][0], coords[0][1]);
+            for (let i = 1; i < coords.length; i++) p.lineTo(coords[i][0], coords[i][1]);
+            p.closePath();
+            return p;
+        }
+        // Standard jet — original svgPlane path offset by -16
+        const pathPlane = buildPath([
+            [0,-14.5],[-1.5,-4],[-11,1],[-11,3],[-1.5,0],[-1.5,10],[-5,12.5],[-5,14],
+            [0,12],[5,14],[5,12.5],[1.5,10],[1.5,0],[11,3],[11,1],[1.5,-4]
+        ]);
+        // Widebody — original svgWidebody path offset by -16
+        const pathWide = buildPath([
+            [0,-15],[-2.5,-4],[-13,1],[-13,3.5],[-2.5,0.5],[-2.5,10],[-6,12.5],[-6,14.5],
+            [0,12],[6,14.5],[6,12.5],[2.5,10],[2.5,0.5],[13,3.5],[13,1],[2.5,-4]
+        ]);
+        // Light prop — original svgLight path offset by -16
+        const pathLight = buildPath([
+            [0,-12],[-1,-2],[-9,2],[-9,3.5],[-1,1],[-1,9],[-4,11],[-4,12.5],
+            [0,11],[4,12.5],[4,11],[1,9],[1,1],[9,3.5],[9,2],[1,-2]
+        ]);
+        // Helicopter — drawn as rotor cross + body
+        const pathHeliH = new Path2D(); // horizontal rotor
+        pathHeliH.rect(-8, -1, 16, 2);
+        const pathHeliV = new Path2D(); // body
+        pathHeliV.rect(-1, -8, 2, 16);
+
+        const shapePaths = { plane: pathPlane, widebody: pathWide, light: pathLight };
+        // Size: pixels for the 32-unit shape at each zoom tier
+        const shapeScales = {
+            widebody: { hi: 0.65, mid: 0.45, lo: 0.30 },
+            plane:    { hi: 0.55, mid: 0.38, lo: 0.25 },
+            light:    { hi: 0.45, mid: 0.30, lo: 0.20 },
+            heli:     { hi: 0.50, mid: 0.35, lo: 0.22 },
+        };
+
+        // --- Canvas aircraft layer (uses layer points for correct zoom animation) ---
+        const AircraftCanvas = L.Layer.extend({
+            onAdd(map) {
+                this._map = map;
+                this._canvas = L.DomUtil.create('canvas', '', map.getPane('overlayPane'));
+                this._ctx = this._canvas.getContext('2d');
+                this._center = map.getCenter();
+                this._zoom = map.getZoom();
+
+                map.on('moveend viewreset resize', this._update, this);
+                map.on('click', this._onClick, this);
+                map.on('mousemove', this._onHover, this);
+                if (map.options.zoomAnimation) {
+                    map.on('zoomanim', this._onAnimZoom, this);
+                }
+
+                this._tooltip = L.DomUtil.create('div', '', map.getContainer());
+                this._tooltip.style.cssText = 'position:absolute;z-index:1000;pointer-events:none;display:none;background:var(--panel);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font:600 11px -apple-system,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,0.3);white-space:nowrap;letter-spacing:0.3px;';
+
+                this._popup = L.popup({ maxWidth: 280, className: '' });
+                this._hitList = [];
+                this._visibleCount = 0;
+                this._hoverThrottle = 0;
+                this._update();
+            },
+
+            onRemove(map) {
+                map.off('moveend viewreset resize', this._update, this);
+                map.off('click', this._onClick, this);
+                map.off('mousemove', this._onHover, this);
+                map.off('zoomanim', this._onAnimZoom, this);
+                L.DomUtil.remove(this._canvas);
+                L.DomUtil.remove(this._tooltip);
+            },
+
+            // During zoom animation, CSS-transform the canvas to follow the map
+            _onAnimZoom(e) {
+                const scale = this._map.getZoomScale(e.zoom, this._zoom);
+                const offset = this._map._latLngToNewLayerPoint(
+                    this._map.getBounds().getNorthWest(), e.zoom, e.center
+                );
+                L.DomUtil.setTransform(this._canvas, offset, scale);
+            },
+
+            // Full update: resize canvas, reposition, redraw
+            _update() {
+                if (!this._map) return;
+                const map = this._map;
+                const size = map.getSize();
+                const dpr = window.devicePixelRatio || 1;
+                const topLeft = map.containerPointToLayerPoint([0, 0]);
+
+                this._canvas.width = size.x * dpr;
+                this._canvas.height = size.y * dpr;
+                this._canvas.style.width = size.x + 'px';
+                this._canvas.style.height = size.y + 'px';
+                this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+                // Reset any CSS transform from zoom animation
+                L.DomUtil.setTransform(this._canvas, topLeft, 1);
+                L.DomUtil.setPosition(this._canvas, topLeft);
+
+                this._origin = topLeft;
+                this._center = map.getCenter();
+                this._zoom = map.getZoom();
+                this._canvasW = size.x;
+                this._canvasH = size.y;
+
+                this._redraw();
+            },
+
+            _redraw() {
+                if (!this._map) return;
+                const ctx = this._ctx;
+                const w = this._canvasW, h = this._canvasH;
+                ctx.clearRect(0, 0, w, h);
+
+                const zoom = this._zoom;
+                const origin = this._origin;
+                const tier = zoom >= 7 ? 'hi' : zoom >= 5 ? 'mid' : 'lo';
+                let vis = 0;
+                this._hitList = [];
+
+                for (const [id, d] of acData) {
+                    if (!shouldDisplay(d)) continue;
+
+                    const pt = this._map.latLngToLayerPoint([d.latitude, d.longitude]);
+                    const x = pt.x - origin.x;
+                    const y = pt.y - origin.y;
+
+                    // Viewport cull with margin
+                    if (x < -20 || x > w + 20 || y < -20 || y > h + 20) continue;
+
+                    const color = typeColors[d._type] || '#f0c040';
+                    const heading = (d.true_track || 0) * Math.PI / 180;
+                    const shape = getShape(d.type);
+                    const sc = (shapeScales[shape] || shapeScales.plane)[tier];
+
+                    const alpha = d._type === 'ground' ? 0.5 : 0.9;
+                    const path = shape === 'heli' ? null : (shapePaths[shape] || pathPlane);
+
+                    ctx.save();
+                    ctx.translate(x, y);
+                    ctx.rotate(heading);
+                    ctx.scale(sc, sc);
+
+                    // Shadow
+                    ctx.globalAlpha = alpha * 0.25;
+                    ctx.fillStyle = '#000';
+                    ctx.translate(1.5 / sc, 1.5 / sc);
+                    if (path) { ctx.fill(path); } else { ctx.fill(pathHeliH); ctx.fill(pathHeliV); }
+                    ctx.translate(-1.5 / sc, -1.5 / sc);
+
+                    // Icon
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = color;
+                    if (path) { ctx.fill(path); } else { ctx.fill(pathHeliH); ctx.fill(pathHeliV); }
+
+                    ctx.restore();
+
+                    this._hitList.push({ id, x, y });
+                    vis++;
+                }
+
+                this._visibleCount = vis;
+            },
+
+            getVisibleCount() { return this._visibleCount; },
+
+            _findNearest(containerPt, threshold) {
+                const x = containerPt.x, y = containerPt.y;
+                let best = null, bestDist = threshold * threshold;
+                for (const h of this._hitList) {
+                    const dx = h.x - x, dy = h.y - y;
+                    const d2 = dx * dx + dy * dy;
+                    if (d2 < bestDist) { bestDist = d2; best = h; }
+                }
+                return best;
+            },
+
+            _onClick(e) {
+                const hit = this._findNearest(e.containerPoint, 20);
+                if (!hit) return;
+                const d = acData.get(hit.id);
+                if (!d) return;
+                L.DomEvent.stopPropagation(e);
+                this._popup.setLatLng([d.latitude, d.longitude])
+                    .setContent(popupContent(d, d._type))
+                    .openOn(this._map);
+            },
+
+            _onHover(e) {
+                const now = Date.now();
+                if (now - this._hoverThrottle < 40) return;
+                this._hoverThrottle = now;
+
+                const hit = this._findNearest(e.containerPoint, 18);
+                if (!hit) { this._hideTooltip(); this._map.getContainer().style.cursor = ''; return; }
+                const d = acData.get(hit.id);
+                if (!d) { this._hideTooltip(); return; }
+                this._map.getContainer().style.cursor = 'pointer';
+                this._tooltip.textContent = d.callsign || d.reg || d.icao24.toUpperCase();
+                this._tooltip.style.display = 'block';
+                this._tooltip.style.left = (e.containerPoint.x + 12) + 'px';
+                this._tooltip.style.top = (e.containerPoint.y - 28) + 'px';
+            },
+
+            _hideTooltip() { this._tooltip.style.display = 'none'; },
+        });
+
+        const acLayer = new AircraftCanvas();
+        acLayer.addTo(map);
+
         function popupContent(a, acType) {
             const alt = metersToFeet(a.baro_altitude);
-            const geoAlt = metersToFeet(a.geo_altitude);
             const spd = msToKnots(a.velocity);
             const pc = popupColors[acType];
             const vr = a.vertical_rate != null ? Math.round(a.vertical_rate * 196.85) : null;
 
-            // Header: callsign + airline + flight
             let html = '<div class="popup-header">';
             html += `<div class="popup-callsign" style="color:${pc}">${a.callsign || a.reg || 'Unknown'}</div>`;
             if (a.airline) {
@@ -773,7 +968,6 @@
             }
             html += '</div>';
 
-            // Aircraft card
             if (a.model || a.reg || a.type) {
                 html += '<div class="popup-aircraft-card">';
                 if (a.model) html += `<div class="ac-model">${a.model}</div>`;
@@ -786,17 +980,21 @@
                 html += '</div></div>';
             }
 
-            // Flight data grid
+            if (a.emergency) html += `<div style="background:#f85149;color:#fff;padding:4px 14px;font-weight:700;font-size:12px;text-align:center">EMERGENCY: ${a.emergency.toUpperCase()}</div>`;
+
             html += '<div class="popup-data">';
             html += `<div class="popup-field"><div class="popup-field-label">Altitude</div><div class="popup-field-value">${alt != null ? ftFmt.format(alt) + ' ft' : '—'}</div></div>`;
-            html += `<div class="popup-field"><div class="popup-field-label">Speed</div><div class="popup-field-value">${spd != null ? ftFmt.format(spd) + ' kts' : '—'}</div></div>`;
+            html += `<div class="popup-field"><div class="popup-field-label">Ground Speed</div><div class="popup-field-value">${spd != null ? ftFmt.format(spd) + ' kts' : '—'}</div></div>`;
             html += `<div class="popup-field"><div class="popup-field-label">Heading</div><div class="popup-field-value">${a.true_track != null ? Math.round(a.true_track) + '°' : '—'}</div></div>`;
-            html += `<div class="popup-field"><div class="popup-field-label">Vertical Speed</div><div class="popup-field-value">${vr != null ? (vr > 0 ? '+' : '') + ftFmt.format(vr) + ' fpm' : '—'}</div></div>`;
-            if (geoAlt != null) html += `<div class="popup-field"><div class="popup-field-label">GPS Alt</div><div class="popup-field-value">${ftFmt.format(geoAlt)} ft</div></div>`;
+            html += `<div class="popup-field"><div class="popup-field-label">V/S</div><div class="popup-field-value">${vr != null ? (vr > 0 ? '+' : '') + ftFmt.format(vr) + ' fpm' : '—'}</div></div>`;
+            if (a.ias != null) html += `<div class="popup-field"><div class="popup-field-label">IAS</div><div class="popup-field-value">${a.ias} kts</div></div>`;
+            if (a.mach != null) html += `<div class="popup-field"><div class="popup-field-label">Mach</div><div class="popup-field-value">${a.mach.toFixed(3)}</div></div>`;
+            if (a.wind_dir != null && a.wind_speed != null) html += `<div class="popup-field"><div class="popup-field-label">Wind</div><div class="popup-field-value">${Math.round(a.wind_dir)}° / ${Math.round(a.wind_speed)} kts</div></div>`;
+            if (a.oat != null) html += `<div class="popup-field"><div class="popup-field-label">Temp (OAT)</div><div class="popup-field-value">${Math.round(a.oat)}°C</div></div>`;
+            if (a.nav_alt != null) html += `<div class="popup-field"><div class="popup-field-label">Selected Alt</div><div class="popup-field-value">${ftFmt.format(a.nav_alt)} ft</div></div>`;
             if (a.squawk) html += `<div class="popup-field"><div class="popup-field-label">Squawk</div><div class="popup-field-value">${a.squawk}</div></div>`;
             html += '</div>';
 
-            // Footer
             html += '<div class="popup-footer">';
             html += `<span>ICAO ${a.icao24.toUpperCase()}</span>`;
             const fr24q = a.callsign || a.reg || a.icao24.toUpperCase();
@@ -805,60 +1003,33 @@
             return html;
         }
 
-        function shouldShow(t) { return filters[t] ? filters[t].checked : true; }
-
-        function shouldDisplay(d) {
-            if (!shouldShow(d._type)) return false;
-            if (!inRegion(d)) return false;
-            if (!matchesSearch(d)) return false;
-            if (activeTypeFilter && d.type !== activeTypeFilter) return false;
-            return true;
-        }
-
         async function fetchAircraft() {
             try {
                 const data = await (await fetch('/api/aircraft')).json();
                 const current = new Set();
                 const tc = { airline: 0, private: 0, military: 0, ground: 0 };
-                let vis = 0;
 
                 for (const a of data.aircraft) {
                     current.add(a.icao24);
                     const t = classifyAircraft(a);
                     tc[t]++;
                     acData.set(a.icao24, { ...a, _type: t });
-                    const stored = { ...a, _type: t };
-                    const show = shouldDisplay(stored);
-                    const pos = [a.latitude, a.longitude];
-                    const tip = a.callsign || a.reg || a.icao24.toUpperCase();
-
-                    if (markers.has(a.icao24)) {
-                        const m = markers.get(a.icao24);
-                        m.setLatLng(pos);
-                        m.setIcon(makeIcon(a.true_track, t, a.type));
-                        m.setPopupContent(popupContent(a, t));
-                        m.setTooltipContent(tip);
-                        if (show) { map.hasLayer(m) || map.addLayer(m); vis++; }
-                        else { map.hasLayer(m) && map.removeLayer(m); }
-                    } else {
-                        const m = L.marker(pos, { icon: makeIcon(a.true_track, t, a.type) })
-                            .bindPopup(popupContent(a, t), { maxWidth: 280, className: '' })
-                            .bindTooltip(tip, { className: 'callsign-tooltip', direction: 'top', offset: [0, -12] });
-                        markers.set(a.icao24, m);
-                        if (show) { map.addLayer(m); vis++; }
-                    }
                 }
 
-                for (const [id, m] of markers) {
-                    if (!current.has(id)) { map.removeLayer(m); markers.delete(id); acData.delete(id); }
+                // Remove stale
+                for (const id of acData.keys()) {
+                    if (!current.has(id)) acData.delete(id);
                 }
+
+                // Redraw canvas
+                acLayer._redraw();
 
                 counts.airline.textContent = tc.airline;
                 counts.private.textContent = tc.private;
                 counts.military.textContent = tc.military;
                 counts.ground.textContent = tc.ground;
                 document.getElementById('s-total').textContent = data.aircraft.length.toLocaleString();
-                document.getElementById('s-visible').textContent = vis.toLocaleString();
+                document.getElementById('s-visible').textContent = acLayer.getVisibleCount().toLocaleString();
 
                 updateTopTypes();
 
@@ -896,17 +1067,10 @@
         }
 
         function applyAllFilters() {
-            let vis = 0;
-            for (const [id, m] of markers) {
-                const d = acData.get(id);
-                if (!d) continue;
-                if (shouldDisplay(d)) { map.hasLayer(m) || map.addLayer(m); vis++; }
-                else { map.hasLayer(m) && map.removeLayer(m); }
-            }
-            document.getElementById('s-visible').textContent = vis.toLocaleString();
+            acLayer._redraw();
+            document.getElementById('s-visible').textContent = acLayer.getVisibleCount().toLocaleString();
             updateTopTypes();
         }
-        // Alias for backward compat
         const applyFilters = applyAllFilters;
         ['airline', 'private', 'military', 'ground'].forEach(k => filters[k].addEventListener('change', applyAllFilters));
 
