@@ -1,0 +1,32 @@
+# Skywatch Flight Tracker - Quadlet Container Unit
+# Deploy to: ~/.config/containers/systemd/skywatch.container
+# Then run: systemctl --user daemon-reload && systemctl --user start skywatch
+
+[Unit]
+Description=Skywatch Flight Tracker
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/skywatch:latest
+PublishPort=8078:8078
+UserNS=keep-id
+Environment=TZ=America/Denver
+AutoUpdate=local
+LogDriver=journald
+Secret=opensky_credentials,target=/run/secrets/opensky_credentials
+HealthCmd=curl -f http://localhost:8078/api/health || exit 1
+HealthInterval=60s
+HealthRetries=3
+HealthStartPeriod=30s
+
+# Optional: mount custom config from host (uncomment to override baked-in config)
+# Volume=/home/skywatch/skywatch/config.yaml:/app/config.yaml:ro,z
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target default.target
