@@ -75,9 +75,30 @@
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.8px;
-            margin: 16px 0 6px;
+            margin: 12px 0 4px;
         }
         #sidebar h3:first-of-type { margin-top: 0; }
+        .section-toggle {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .section-toggle::before {
+            content: '';
+            display: inline-block;
+            width: 0; height: 0;
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid var(--muted);
+            margin-right: 6px;
+            transition: transform 0.15s;
+        }
+        .section-toggle.collapsed::before {
+            transform: rotate(-90deg);
+        }
+        .section-body { overflow: hidden; }
+        .section-body.collapsed { display: none; }
         .filter-row {
             display: flex;
             align-items: center;
@@ -387,83 +408,70 @@
                 <div class="region-pill" data-region="oc">Oceania</div>
             </div>
 
-            <h3 style="display:flex;align-items:center">Aircraft <span id="toggle-all" style="margin-left:auto;font-size:10px;font-weight:500;color:var(--accent);cursor:pointer;text-transform:none;letter-spacing:0">Deselect all</span></h3>
-            <label class="filter-row">
-                <input type="checkbox" id="f-airline" checked>
-                <div class="filter-dot" style="color:#f0c040;background:#f0c040"></div>
-                <span class="filter-label">Airline</span>
-                <span class="filter-count" id="c-airline">0</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-private" checked>
-                <div class="filter-dot" style="color:#4ecdc4;background:#4ecdc4"></div>
-                <span class="filter-label">Private / GA</span>
-                <span class="filter-count" id="c-private">0</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-military" checked>
-                <div class="filter-dot" style="color:#f85149;background:#f85149"></div>
-                <span class="filter-label">Military</span>
-                <span class="filter-count" id="c-military">0</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-ground" checked>
-                <div class="filter-dot" style="color:#636e7b;background:#636e7b"></div>
-                <span class="filter-label">On Ground</span>
-                <span class="filter-count" id="c-ground">0</span>
-            </label>
-
-            <h3>Top Types</h3>
-            <div id="top-types"></div>
-
-            <h3>Layers</h3>
-            <label class="filter-row">
-                <input type="checkbox" id="f-airports" checked>
-                <div class="filter-dot" style="color:#58a6ff;background:#58a6ff"></div>
-                <span class="filter-label">Airports</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-night" checked>
-                <div class="filter-dot" style="color:#444c56;background:#444c56"></div>
-                <span class="filter-label">Day / Night</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-clouds">
-                <div class="filter-dot" style="color:#8899aa;background:#8899aa"></div>
-                <span class="filter-label">Clouds</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-precip">
-                <div class="filter-dot" style="color:#4fc3f7;background:#4fc3f7"></div>
-                <span class="filter-label">Precipitation</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-wind">
-                <div class="filter-dot" style="color:#81c784;background:#81c784"></div>
-                <span class="filter-label">Wind</span>
-            </label>
-            <label class="filter-row">
-                <input type="checkbox" id="f-temp">
-                <div class="filter-dot" style="color:#ff8a65;background:#ff8a65"></div>
-                <span class="filter-label">Temperature</span>
-            </label>
-
-            <h3>Map Style</h3>
-            <div class="region-pills" id="map-style-pills">
-                <div class="region-pill active" data-style="dark">Dark</div>
-                <div class="region-pill" data-style="light">Light</div>
-                <div class="region-pill" data-style="satellite">Satellite</div>
-                <div class="region-pill" data-style="terrain">Terrain</div>
+            <h3 class="section-toggle" data-section="aircraft">Aircraft <span id="toggle-all" style="margin-left:auto;font-size:10px;font-weight:500;color:var(--accent);cursor:pointer;text-transform:none;letter-spacing:0">Deselect all</span></h3>
+            <div class="section-body" data-section="aircraft">
+                <label class="filter-row">
+                    <input type="checkbox" id="f-airline" checked>
+                    <div class="filter-dot" style="color:#f0c040;background:#f0c040"></div>
+                    <span class="filter-label">Airline</span>
+                    <span class="filter-count" id="c-airline">0</span>
+                </label>
+                <label class="filter-row">
+                    <input type="checkbox" id="f-private" checked>
+                    <div class="filter-dot" style="color:#4ecdc4;background:#4ecdc4"></div>
+                    <span class="filter-label">Private / GA</span>
+                    <span class="filter-count" id="c-private">0</span>
+                </label>
+                <label class="filter-row">
+                    <input type="checkbox" id="f-military" checked>
+                    <div class="filter-dot" style="color:#f85149;background:#f85149"></div>
+                    <span class="filter-label">Military</span>
+                    <span class="filter-count" id="c-military">0</span>
+                </label>
+                <label class="filter-row">
+                    <input type="checkbox" id="f-ground" checked>
+                    <div class="filter-dot" style="color:#636e7b;background:#636e7b"></div>
+                    <span class="filter-label">On Ground</span>
+                    <span class="filter-count" id="c-ground">0</span>
+                </label>
             </div>
 
-            <h3>Theme</h3>
-            <label class="filter-row">
-                <span class="filter-label">Dark Mode</span>
-                <div class="toggle-switch">
-                    <input type="checkbox" id="f-theme" checked>
-                    <div class="toggle-track"></div>
+            <h3 class="section-toggle collapsed" data-section="types">Top Aircraft Types</h3>
+            <div class="section-body collapsed" data-section="types">
+                <div id="top-types" style="max-height:200px;overflow-y:auto"></div>
+            </div>
+
+            <h3 class="section-toggle" data-section="layers">Layers</h3>
+            <div class="section-body" data-section="layers">
+                <label class="filter-row">
+                    <input type="checkbox" id="f-airports" checked>
+                    <div class="filter-dot" style="color:#58a6ff;background:#58a6ff"></div>
+                    <span class="filter-label">Airports</span>
+                </label>
+                <label class="filter-row">
+                    <input type="checkbox" id="f-night" checked>
+                    <div class="filter-dot" style="color:#444c56;background:#444c56"></div>
+                    <span class="filter-label">Day / Night</span>
+                </label>
+            </div>
+
+
+            <h3 class="section-toggle" data-section="display">Display</h3>
+            <div class="section-body" data-section="display">
+                <div class="region-pills" id="map-style-pills" style="margin-bottom:8px">
+                    <div class="region-pill active" data-style="dark">Dark</div>
+                    <div class="region-pill" data-style="light">Light</div>
+                    <div class="region-pill" data-style="satellite">Satellite</div>
+                    <div class="region-pill" data-style="terrain">Terrain</div>
                 </div>
-            </label>
+                <label class="filter-row">
+                    <span class="filter-label">Dark Menu</span>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="f-theme" checked>
+                        <div class="toggle-track"></div>
+                    </div>
+                </label>
+            </div>
 
             <div id="sidebar-stats">
                 Total: <span id="s-total">0</span><br>
@@ -475,6 +483,17 @@
     <div id="status">Connecting...</div>
 
     <script>
+        // --- Collapsible sections ---
+        document.querySelectorAll('.section-toggle').forEach(h3 => {
+            h3.addEventListener('click', (e) => {
+                if (e.target.id === 'toggle-all') return; // Don't toggle when clicking deselect all
+                const section = h3.dataset.section;
+                const body = document.querySelector(`.section-body[data-section="${section}"]`);
+                h3.classList.toggle('collapsed');
+                body.classList.toggle('collapsed');
+            });
+        });
+
         const filters = {
             airline: document.getElementById('f-airline'),
             private: document.getElementById('f-private'),
@@ -639,6 +658,8 @@
         const tileOpts = { attribution: tileAttr, subdomains: 'abcd', maxZoom: 18 };
 
         // Map style tile sets
+        const darkLabelOpts = { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' };
+
         const mapStyles = {
             dark: () => L.layerGroup([
                 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', tileOpts),
@@ -650,16 +671,19 @@
             ]),
             satellite: () => L.layerGroup([
                 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 }),
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' }),
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', darkLabelOpts),
             ]),
             terrain: () => L.layerGroup([
-                L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain-background/{z}/{x}/{y}.png', { attribution: '&copy; Stamen &copy; OSM', maxZoom: 18 }),
-                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane', opacity: 0.8 }),
+                L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenTopoMap &copy; OSM', maxZoom: 17, subdomains: 'abc' }),
             ]),
         };
-        // Which styles use dark UI
-        const darkStyles = new Set(['dark', 'satellite']);
+
+        // Night overlay — created early so setMapStyle can reference it
+        const nightLayer = L.polygon([], { fillColor: '#000', fillOpacity: 0.38, stroke: true, color: '#8ab4f8', weight: 1, opacity: 0.5, interactive: false }).addTo(map);
+        const nightOpacity = { dark: 0.38, light: 0.30, satellite: 0.20, terrain: 0.18 };
+
         let activeStyle = localStorage.getItem('skywatch-map-style') || 'dark';
+        if (!mapStyles[activeStyle]) activeStyle = 'dark';
         let currentTiles = mapStyles[activeStyle]();
         currentTiles.addTo(map);
 
@@ -668,10 +692,8 @@
             currentTiles = mapStyles[style]();
             currentTiles.addTo(map);
             activeStyle = style;
-            document.body.classList.toggle('light', !darkStyles.has(style));
-            document.getElementById('f-theme').checked = darkStyles.has(style);
+            nightLayer.setStyle({ fillOpacity: nightOpacity[style] || 0.30 });
             localStorage.setItem('skywatch-map-style', style);
-            // Update pills
             document.querySelectorAll('#map-style-pills .region-pill').forEach(p => {
                 p.classList.toggle('active', p.dataset.style === style);
             });
@@ -681,39 +703,28 @@
             pill.addEventListener('click', () => setMapStyle(pill.dataset.style));
         });
 
-        // Theme toggle syncs with map style
-        document.getElementById('f-theme').addEventListener('change', e => {
-            setMapStyle(e.target.checked ? 'dark' : 'light');
-        });
+        // Dark mode toggle — controls sidebar/UI only, independent of map style
+        function setTheme(dark) {
+            document.body.classList.toggle('light', !dark);
+            localStorage.setItem('skywatch-theme', dark ? 'dark' : 'light');
+        }
+        document.getElementById('f-theme').addEventListener('change', e => setTheme(e.target.checked));
+        if (localStorage.getItem('skywatch-theme') === 'light') {
+            document.getElementById('f-theme').checked = false;
+            setTheme(false);
+        }
 
-        // Restore saved style
+        // Restore saved map style
         if (activeStyle !== 'dark') {
             setMapStyle(activeStyle);
         }
 
-        // --- Weather overlay layers (OpenWeatherMap free tiles) ---
-        const owmKey = '1b3fdb88bc0dfbcdd5e43d3e31a1b6c2'; // free demo key
-        const owmOpts = { maxZoom: 18, opacity: 0.5, attribution: '&copy; OpenWeatherMap' };
-        const weatherLayers = {
-            clouds: L.tileLayer(`https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=${owmKey}`, owmOpts),
-            precip: L.tileLayer(`https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${owmKey}`, owmOpts),
-            wind:   L.tileLayer(`https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=${owmKey}`, { ...owmOpts, opacity: 0.4 }),
-            temp:   L.tileLayer(`https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=${owmKey}`, { ...owmOpts, opacity: 0.4 }),
-        };
-
-        ['clouds', 'precip', 'wind', 'temp'].forEach(key => {
-            const el = document.getElementById('f-' + key);
-            el.addEventListener('change', () => {
-                el.checked ? weatherLayers[key].addTo(map) : map.removeLayer(weatherLayers[key]);
-            });
-        });
 
         renderTzBar();
         setInterval(renderTzBar, 30000);
         map.on('moveend', renderTzBar);
 
         // --- Day/night terminator ---
-        const nightLayer = L.polygon([], { fillColor: '#000', fillOpacity: 0.38, stroke: true, color: '#8ab4f8', weight: 1, opacity: 0.5, interactive: false }).addTo(map);
         function updateTerminator() {
             const now = new Date();
             const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
