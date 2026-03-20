@@ -10,16 +10,16 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --bg: #0d1117; --fg: #c9d1d9; --panel: #161b22; --border: #21262d;
-            --surface: #1c2128; --accent: #58a6ff; --muted: #8b949e; --dim: #484f58;
-            --popup-bg: #1c2128; --popup-fg: #c9d1d9;
-            --glow: rgba(88, 166, 255, 0.08);
+            --bg: #0a0e14; --fg: #b0b8c4; --panel: #111820; --border: #1a2230;
+            --surface: #141c26; --accent: #4a90d9; --muted: #6b7685; --dim: #3d4654;
+            --popup-bg: #141c26; --popup-fg: #b0b8c4;
+            --glow: rgba(74, 144, 217, 0.07);
         }
         body.light {
-            --bg: #f6f8fa; --fg: #24292f; --panel: #ffffff; --border: #d0d7de;
-            --surface: #f6f8fa; --accent: #0969da; --muted: #656d76; --dim: #8c959f;
-            --popup-bg: #ffffff; --popup-fg: #24292f;
-            --glow: rgba(9, 105, 218, 0.06);
+            --bg: #f0f0f0; --fg: #1a1a2e; --panel: #ffffff; --border: #dcdcdc;
+            --surface: #f5f5f5; --accent: #1a73e8; --muted: #5f6368; --dim: #9aa0a6;
+            --popup-bg: #ffffff; --popup-fg: #1a1a2e;
+            --glow: rgba(26, 115, 232, 0.06);
         }
         html, body { height: 100%; background: var(--bg); color: var(--fg); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 
@@ -132,7 +132,7 @@
         .type-row.active { background: var(--accent); color: #fff; }
         .type-row.active .type-name { color: #fff; }
         .type-row.active .type-count { color: rgba(255,255,255,0.7); }
-        .type-name { flex: 1; color: var(--fg); font-weight: 500; font-family: monospace; font-size: 11px; }
+        .type-name { flex: 1; color: var(--fg); font-weight: 500; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .type-count { color: var(--dim); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 10px; }
 
         #sidebar-stats {
@@ -427,6 +427,34 @@
                 <div class="filter-dot" style="color:#444c56;background:#444c56"></div>
                 <span class="filter-label">Day / Night</span>
             </label>
+            <label class="filter-row">
+                <input type="checkbox" id="f-clouds">
+                <div class="filter-dot" style="color:#8899aa;background:#8899aa"></div>
+                <span class="filter-label">Clouds</span>
+            </label>
+            <label class="filter-row">
+                <input type="checkbox" id="f-precip">
+                <div class="filter-dot" style="color:#4fc3f7;background:#4fc3f7"></div>
+                <span class="filter-label">Precipitation</span>
+            </label>
+            <label class="filter-row">
+                <input type="checkbox" id="f-wind">
+                <div class="filter-dot" style="color:#81c784;background:#81c784"></div>
+                <span class="filter-label">Wind</span>
+            </label>
+            <label class="filter-row">
+                <input type="checkbox" id="f-temp">
+                <div class="filter-dot" style="color:#ff8a65;background:#ff8a65"></div>
+                <span class="filter-label">Temperature</span>
+            </label>
+
+            <h3>Map Style</h3>
+            <div class="region-pills" id="map-style-pills">
+                <div class="region-pill active" data-style="dark">Dark</div>
+                <div class="region-pill" data-style="light">Light</div>
+                <div class="region-pill" data-style="satellite">Satellite</div>
+                <div class="region-pill" data-style="terrain">Terrain</div>
+            </div>
 
             <h3>Theme</h3>
             <label class="filter-row">
@@ -609,31 +637,83 @@
 
         const tileAttr = '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>';
         const tileOpts = { attribution: tileAttr, subdomains: 'abcd', maxZoom: 18 };
-        const darkBase = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', tileOpts);
-        const darkLabels = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' });
-        const darkTiles = L.layerGroup([darkBase, darkLabels]);
-        const lightTiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', tileOpts);
-        let currentTiles = darkTiles;
-        darkTiles.addTo(map);
 
-        function setTheme(dark) {
-            document.body.classList.toggle('light', !dark);
-            const next = dark ? darkTiles : lightTiles;
-            if (currentTiles !== next) { map.removeLayer(currentTiles); next.addTo(map); currentTiles = next; }
-            localStorage.setItem('skywatch-theme', dark ? 'dark' : 'light');
+        // Map style tile sets
+        const mapStyles = {
+            dark: () => L.layerGroup([
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', tileOpts),
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' }),
+            ]),
+            light: () => L.layerGroup([
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', tileOpts),
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' }),
+            ]),
+            satellite: () => L.layerGroup([
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '&copy; Esri', maxZoom: 18 }),
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane' }),
+            ]),
+            terrain: () => L.layerGroup([
+                L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain-background/{z}/{x}/{y}.png', { attribution: '&copy; Stamen &copy; OSM', maxZoom: 18 }),
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { subdomains: 'abcd', maxZoom: 18, pane: 'overlayPane', opacity: 0.8 }),
+            ]),
+        };
+        // Which styles use dark UI
+        const darkStyles = new Set(['dark', 'satellite']);
+        let activeStyle = localStorage.getItem('skywatch-map-style') || 'dark';
+        let currentTiles = mapStyles[activeStyle]();
+        currentTiles.addTo(map);
+
+        function setMapStyle(style) {
+            map.removeLayer(currentTiles);
+            currentTiles = mapStyles[style]();
+            currentTiles.addTo(map);
+            activeStyle = style;
+            document.body.classList.toggle('light', !darkStyles.has(style));
+            document.getElementById('f-theme').checked = darkStyles.has(style);
+            localStorage.setItem('skywatch-map-style', style);
+            // Update pills
+            document.querySelectorAll('#map-style-pills .region-pill').forEach(p => {
+                p.classList.toggle('active', p.dataset.style === style);
+            });
         }
-        if (localStorage.getItem('skywatch-theme') === 'light') {
-            document.getElementById('f-theme').checked = false;
-            setTheme(false);
+
+        document.querySelectorAll('#map-style-pills .region-pill').forEach(pill => {
+            pill.addEventListener('click', () => setMapStyle(pill.dataset.style));
+        });
+
+        // Theme toggle syncs with map style
+        document.getElementById('f-theme').addEventListener('change', e => {
+            setMapStyle(e.target.checked ? 'dark' : 'light');
+        });
+
+        // Restore saved style
+        if (activeStyle !== 'dark') {
+            setMapStyle(activeStyle);
         }
-        document.getElementById('f-theme').addEventListener('change', e => setTheme(e.target.checked));
+
+        // --- Weather overlay layers (OpenWeatherMap free tiles) ---
+        const owmKey = '1b3fdb88bc0dfbcdd5e43d3e31a1b6c2'; // free demo key
+        const owmOpts = { maxZoom: 18, opacity: 0.5, attribution: '&copy; OpenWeatherMap' };
+        const weatherLayers = {
+            clouds: L.tileLayer(`https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid=${owmKey}`, owmOpts),
+            precip: L.tileLayer(`https://tile.openweathermap.org/map/precipitation_new/{z}/{x}/{y}.png?appid=${owmKey}`, owmOpts),
+            wind:   L.tileLayer(`https://tile.openweathermap.org/map/wind_new/{z}/{x}/{y}.png?appid=${owmKey}`, { ...owmOpts, opacity: 0.4 }),
+            temp:   L.tileLayer(`https://tile.openweathermap.org/map/temp_new/{z}/{x}/{y}.png?appid=${owmKey}`, { ...owmOpts, opacity: 0.4 }),
+        };
+
+        ['clouds', 'precip', 'wind', 'temp'].forEach(key => {
+            const el = document.getElementById('f-' + key);
+            el.addEventListener('change', () => {
+                el.checked ? weatherLayers[key].addTo(map) : map.removeLayer(weatherLayers[key]);
+            });
+        });
 
         renderTzBar();
         setInterval(renderTzBar, 30000);
         map.on('moveend', renderTzBar);
 
         // --- Day/night terminator ---
-        const nightLayer = L.polygon([], { fillColor: '#000', fillOpacity: 0.2, stroke: true, color: '#58a6ff', weight: 0.5, opacity: 0.3, interactive: false }).addTo(map);
+        const nightLayer = L.polygon([], { fillColor: '#000', fillOpacity: 0.38, stroke: true, color: '#8ab4f8', weight: 1, opacity: 0.5, interactive: false }).addTo(map);
         function updateTerminator() {
             const now = new Date();
             const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
@@ -688,6 +768,137 @@
         map.on('zoomend', updateAirportVisibility);
         filters.airports.addEventListener('change', updateAirportVisibility);
         loadAirports();
+
+        // --- ICAO type code to friendly name ---
+        const typeNames = {
+            // Airbus narrowbody
+            A318:'Airbus A318',A319:'Airbus A319',A320:'Airbus A320',A321:'Airbus A321',
+            A19N:'Airbus A319neo',A20N:'Airbus A320neo',A21N:'Airbus A321neo',
+            // Airbus widebody
+            A332:'Airbus A330-200',A333:'Airbus A330-300',A338:'Airbus A330-800',A339:'Airbus A330-900',
+            A342:'Airbus A340-200',A343:'Airbus A340-300',A345:'Airbus A340-500',A346:'Airbus A340-600',
+            A359:'Airbus A350-900',A35K:'Airbus A350-1000',
+            A380:'Airbus A380',A388:'Airbus A380-800',A3ST:'Airbus Beluga',
+            // Boeing narrowbody
+            B731:'Boeing 737-100',B732:'Boeing 737-200',B733:'Boeing 737-300',B734:'Boeing 737-400',
+            B735:'Boeing 737-500',B736:'Boeing 737-600',B737:'Boeing 737-700',B738:'Boeing 737-800',
+            B739:'Boeing 737-900',B37M:'Boeing 737 MAX 7',B38M:'Boeing 737 MAX 8',B39M:'Boeing 737 MAX 9',
+            B3XM:'Boeing 737 MAX 10',
+            B712:'Boeing 717',B721:'Boeing 727-100',B722:'Boeing 727-200',
+            // Boeing widebody
+            B741:'Boeing 747-100',B742:'Boeing 747-200',B743:'Boeing 747-300',
+            B744:'Boeing 747-400',B748:'Boeing 747-8',B74S:'Boeing 747SP',
+            B752:'Boeing 757-200',B753:'Boeing 757-300',
+            B762:'Boeing 767-200',B763:'Boeing 767-300',B764:'Boeing 767-400',
+            B772:'Boeing 777-200',B773:'Boeing 777-300',B77L:'Boeing 777-200LR',
+            B77W:'Boeing 777-300ER',B778:'Boeing 777-8',B779:'Boeing 777-9',
+            B788:'Boeing 787-8',B789:'Boeing 787-9',B78X:'Boeing 787-10',
+            // McDonnell Douglas
+            MD11:'McDonnell Douglas MD-11',MD80:'McDonnell Douglas MD-80',MD81:'MD-81',
+            MD82:'MD-82',MD83:'MD-83',MD87:'MD-87',MD88:'MD-88',MD90:'MD-90',
+            DC10:'McDonnell Douglas DC-10',DC87:'Douglas DC-8-70',
+            // Embraer
+            E170:'Embraer E170',E175:'Embraer E175',E190:'Embraer E190',E195:'Embraer E195',
+            E75L:'Embraer E175 Long',E75S:'Embraer E175 Short',E290:'Embraer E190-E2',E295:'Embraer E195-E2',
+            E135:'Embraer ERJ-135',E145:'Embraer ERJ-145',E35L:'Embraer Legacy 600',
+            // Bombardier / De Havilland
+            CRJ1:'Bombardier CRJ-100',CRJ2:'Bombardier CRJ-200',CRJ7:'Bombardier CRJ-700',
+            CRJ9:'Bombardier CRJ-900',CRJX:'Bombardier CRJ-1000',
+            DH8A:'Dash 8-100',DH8B:'Dash 8-200',DH8C:'Dash 8-300',DH8D:'Dash 8-400',
+            BCS1:'Airbus A220-100',BCS3:'Airbus A220-300',
+            GL5T:'Bombardier Global 5500',GL7T:'Bombardier Global 7500',GLEX:'Bombardier Global Express',
+            // ATR
+            AT43:'ATR 42-300',AT45:'ATR 42-500',AT46:'ATR 42-600',
+            AT72:'ATR 72-200',AT75:'ATR 72-500',AT76:'ATR 72-600',
+            // Cessna
+            C150:'Cessna 150',C152:'Cessna 152',C172:'Cessna 172',C177:'Cessna Cardinal',
+            C180:'Cessna 180',C182:'Cessna 182',C185:'Cessna 185',C205:'Cessna 205',
+            C206:'Cessna 206',C207:'Cessna 207',C208:'Cessna Caravan',C210:'Cessna 210',
+            C25A:'Citation CJ2',C25B:'Citation CJ3',C25C:'Citation CJ4',
+            C500:'Citation I',C510:'Citation Mustang',C525:'CitationJet',
+            C550:'Citation II',C560:'Citation V',C56X:'Citation Excel',
+            C680:'Citation Sovereign',C68A:'Citation Latitude',C700:'Citation Longitude',
+            C750:'Citation X',
+            // Piper
+            PA18:'Piper Super Cub',PA28:'Piper Cherokee',PA30:'Piper Twin Comanche',
+            PA31:'Piper Navajo',PA32:'Piper Saratoga',PA34:'Piper Seneca',
+            PA44:'Piper Seminole',PA46:'Piper Malibu',
+            P28A:'Piper Cherokee',P28B:'Piper Dakota',P28R:'Piper Arrow',P28T:'Piper Turbo Arrow',
+            // Beechcraft
+            BE33:'Beechcraft Bonanza',BE35:'Beechcraft Bonanza',BE36:'Beechcraft Bonanza 36',
+            BE40:'Beechjet 400',BE20:'Beechcraft King Air 200',BE30:'Beechcraft King Air 300',
+            B350:'Beechcraft King Air 350',BE9L:'Beechcraft King Air 90',
+            // Cirrus / Diamond / Mooney
+            SR20:'Cirrus SR20',SR22:'Cirrus SR22',SF50:'Cirrus Vision Jet',
+            DA20:'Diamond DA20',DA40:'Diamond DA40',DA42:'Diamond DA42',DA62:'Diamond DA62',
+            M20J:'Mooney M20J',M20K:'Mooney M20K',M20T:'Mooney M20',
+            // Pilatus
+            PC12:'Pilatus PC-12',PC21:'Pilatus PC-21',PC24:'Pilatus PC-24',
+            // Business jets
+            CL30:'Bombardier Challenger 300',CL35:'Bombardier Challenger 350',CL60:'Bombardier Challenger 600',
+            E50P:'Embraer Phenom 100',E55P:'Embraer Phenom 300',
+            FA50:'Dassault Falcon 50',FA7X:'Dassault Falcon 7X',FA8X:'Dassault Falcon 8X',
+            F900:'Dassault Falcon 900',F2TH:'Dassault Falcon 2000',
+            G150:'Gulfstream G150',G280:'Gulfstream G280',GLF4:'Gulfstream IV',
+            GLF5:'Gulfstream V',GLF6:'Gulfstream G650',GA5C:'Gulfstream G500',GA6C:'Gulfstream G600',
+            LJ35:'Learjet 35',LJ45:'Learjet 45',LJ60:'Learjet 60',LJ75:'Learjet 75',
+            // Helicopters
+            EC35:'Airbus EC135',EC45:'Airbus EC145',EC55:'Airbus EC155',
+            H135:'Airbus H135',H145:'Airbus H145',H160:'Airbus H160',H175:'Airbus H175',H225:'Airbus H225',
+            AS50:'Airbus AS350',AS55:'Airbus AS355',
+            A109:'Leonardo AW109',A119:'Leonardo AW119',A139:'Leonardo AW139',A169:'Leonardo AW169',A189:'Leonardo AW189',
+            B06:'Bell 206',B206:'Bell 206',B407:'Bell 407',B412:'Bell 412',B429:'Bell 429',
+            R22:'Robinson R22',R44:'Robinson R44',R66:'Robinson R66',
+            S76:'Sikorsky S-76',S92:'Sikorsky S-92',
+            UH60:'Black Hawk',AH64:'Apache',CH47:'Chinook',
+            // Military
+            C130:'Lockheed C-130 Hercules',C17:'Boeing C-17 Globemaster',C5M:'Lockheed C-5 Galaxy',
+            E3CF:'Boeing E-3 Sentry',K35R:'Boeing KC-135',KC10:'McDonnell Douglas KC-10',
+            B52:'Boeing B-52',F16:'F-16 Fighting Falcon',F15:'F-15 Eagle',F18H:'F/A-18 Hornet',
+            F35:'F-35 Lightning II',A10:'Fairchild A-10 Thunderbolt',
+            P8:'Boeing P-8 Poseidon',E6:'Boeing E-6 Mercury',
+            V22:'Bell Boeing V-22 Osprey',
+            A124:'Antonov An-124',AN12:'Antonov An-12',
+            IL76:'Ilyushin Il-76',IL96:'Ilyushin Il-96',
+            // Turboprops / Regional
+            SF34:'Saab 340',SB20:'Saab 2000',JS41:'Jetstream 41',
+            D228:'Dornier 228',D328:'Dornier 328',
+            F50:'Fokker 50',F70:'Fokker 70',F100:'Fokker 100',
+            RJ85:'Avro RJ85',RJ1H:'Avro RJ100',
+            // Airbus widebody (older)
+            A306:'Airbus A300-600',A30B:'Airbus A300',
+            // Military / govt
+            C30J:'Lockheed C-130J Super Hercules',H60:'Sikorsky H-60',H47:'Boeing CH-47 Chinook',
+            R135:'Boeing RC-135',TEX2:'Beechcraft T-6 Texan II',HAWK:'BAE Hawk',
+            // Cessna variants
+            C72R:'Cessna 172 RG',C650:'Cessna Citation III',T206:'Cessna T206',
+            // Beechcraft
+            BE58:'Beechcraft Baron 58',BE95:'Beechcraft Travel Air',B190:'Beechcraft 1900',
+            // Eurocopter / Airbus Heli
+            EC30:'Airbus EC130',E45X:'Airbus EC145T2',AS65:'Airbus AS365 Dauphin',H500:'MD 500',
+            // Hawker / BAE
+            H25B:'Hawker 800',
+            // Embraer
+            E545:'Embraer Legacy 450',E120:'Embraer EMB 120 Brasilia',
+            // Mooney
+            M20P:'Mooney M20',
+            // Diamond
+            DV20:'Diamond DV20 Katana',
+            // Vans RV
+            RV6:'Vans RV-6',RV7:'Vans RV-7',RV8:'Vans RV-8',RV9:'Vans RV-9',
+            RV10:'Vans RV-10',RV14:'Vans RV-14',
+            // Misc
+            CONC:'Concorde',AN2:'Antonov An-2',C337:'Cessna Skymaster',
+            TBM7:'Daher TBM 700',TBM8:'Daher TBM 850',TBM9:'Daher TBM 900',
+            TWR:'Tower / Ground Vehicle',SERV:'Service Vehicle',
+            P68:'Partenavia P.68',GA8:'GippsAero GA8 Airvan',DHC6:'De Havilland DHC-6 Twin Otter',
+            SW4:'Fairchild Swearingen Metroliner',PA38:'Piper Tomahawk',
+            G2CA:'Gulfstream G280',AJ27:'BAE Avro RJ',SLG2:'Stemme S12',
+            CRUZ:'Cub Crafters Carbon Cub',S22T:'Cirrus SR22T',
+            HR20:'Robin HR200',COL4:'Columbia 400',CT4:'Flight Design CT',
+            GA5C:'Gulfstream G500',GA6C:'Gulfstream G600',P32R:'Piper Saratoga',
+        };
+        function typeName(code) { return code ? (typeNames[code.toUpperCase()] || code) : code; }
 
         // --- Aircraft ---
         const acData = new Map();
@@ -773,10 +984,10 @@
         const shapePaths = { plane: pathPlane, widebody: pathWide, light: pathLight };
         // Size: pixels for the 32-unit shape at each zoom tier
         const shapeScales = {
-            widebody: { hi: 0.65, mid: 0.45, lo: 0.30 },
-            plane:    { hi: 0.55, mid: 0.38, lo: 0.25 },
-            light:    { hi: 0.45, mid: 0.30, lo: 0.20 },
-            heli:     { hi: 0.50, mid: 0.35, lo: 0.22 },
+            widebody: { hi: 1.0,  mid: 0.70, lo: 0.48 },
+            plane:    { hi: 0.85, mid: 0.60, lo: 0.40 },
+            light:    { hi: 0.70, mid: 0.48, lo: 0.32 },
+            heli:     { hi: 0.75, mid: 0.55, lo: 0.36 },
         };
 
         // --- Canvas aircraft layer (uses layer points for correct zoom animation) ---
@@ -859,6 +1070,7 @@
                 const zoom = this._zoom;
                 const origin = this._origin;
                 const tier = zoom >= 7 ? 'hi' : zoom >= 5 ? 'mid' : 'lo';
+                const worldWidth = 256 * Math.pow(2, zoom);
                 let vis = 0;
                 this._hitList = [];
 
@@ -866,11 +1078,15 @@
                     if (!shouldDisplay(d)) continue;
 
                     const pt = this._map.latLngToLayerPoint([d.latitude, d.longitude]);
-                    const x = pt.x - origin.x;
+                    let x = pt.x - origin.x;
                     const y = pt.y - origin.y;
 
-                    // Viewport cull with margin
-                    if (x < -20 || x > w + 20 || y < -20 || y > h + 20) continue;
+                    if (y < -20 || y > h + 20) continue;
+
+                    // Handle world wrapping — shift into viewport
+                    while (x > w + 20) x -= worldWidth;
+                    while (x < -20) x += worldWidth;
+                    if (x < -20 || x > w + 20) continue;
 
                     const color = typeColors[d._type] || '#f0c040';
                     const heading = (d.true_track || 0) * Math.PI / 180;
@@ -971,7 +1187,7 @@
             if (a.model || a.reg || a.type) {
                 html += '<div class="popup-aircraft-card">';
                 if (a.model) html += `<div class="ac-model">${a.model}</div>`;
-                if (a.type) html += `<div class="ac-type">ICAO Type: ${a.type}</div>`;
+                if (a.type) html += `<div class="ac-type">${typeName(a.type)}${typeName(a.type) !== a.type ? ' (' + a.type + ')' : ''}</div>`;
                 html += '<div class="ac-details">';
                 if (a.reg) html += `<div><div class="ac-field-label">Registration</div><div class="ac-field-value">${a.reg}</div></div>`;
                 if (a.year) html += `<div><div class="ac-field-label">Built</div><div class="ac-field-value">${a.year}</div></div>`;
@@ -1055,7 +1271,7 @@
             const allTypes = Object.entries(typeBucket).sort((a, b) => b[1] - a[1]);
             const el = document.getElementById('top-types');
             el.innerHTML = allTypes.map(([name, count]) =>
-                `<div class="type-row${activeTypeFilter === name ? ' active' : ''}" data-type="${name}"><span class="type-name">${name}</span><span class="type-count">${count}</span></div>`
+                `<div class="type-row${activeTypeFilter === name ? ' active' : ''}" data-type="${name}"><span class="type-name" title="${name}">${typeName(name)}</span><span class="type-count">${count}</span></div>`
             ).join('');
 
             el.querySelectorAll('.type-row').forEach(row => {

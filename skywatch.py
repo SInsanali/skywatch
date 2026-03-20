@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("skywatch")
 
-ADSBX_BASE = "https://api.adsb.lol/v2"
+ADSBX_BASE = "https://api.airplanes.live/v2"
 ACDB_URL = "https://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz"
 AIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.csv"
 AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat"
