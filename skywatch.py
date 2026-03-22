@@ -36,7 +36,24 @@ ACDB_REFRESH_HOURS = 24
 VIEWER_TIMEOUT = 60
 GLOBAL_QUERY_RADIUS = 10000  # nm — large enough to cover the entire globe
 
-CELESTRAK_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle"
+CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/gp.php?FORMAT=tle&GROUP="
+CELESTRAK_GROUPS = {
+    "stations": "Space Stations",
+    "starlink": "Starlink",
+    "gps-ops": "GPS",
+    "galileo": "Galileo",
+    "iridium-NEXT": "Iridium",
+    "globalstar": "Globalstar",
+    "oneweb": "OneWeb",
+    "weather": "Weather",
+    "noaa": "NOAA",
+    "goes": "GOES",
+    "planet": "Planet Labs",
+    "military": "Military",
+    "science": "Science",
+}
+# Limit Starlink to avoid overwhelming the globe
+STARLINK_MAX = 200
 TLE_REFRESH_HOURS = 6
 SAT_PROPAGATE_INTERVAL = 5  # seconds
 
@@ -73,6 +90,17 @@ class Config:
             path = Path("config.yaml")
         with open(path) as f:
             raw = yaml.safe_load(f)
+
+        # Overlay secrets.yaml if it exists (gitignored, holds API keys)
+        secrets_path = path.parent / "secrets.yaml"
+        if secrets_path.exists():
+            with open(secrets_path) as f:
+                secrets = yaml.safe_load(f) or {}
+            for key, val in secrets.items():
+                if isinstance(val, dict) and isinstance(raw.get(key), dict):
+                    raw[key].update(val)
+                else:
+                    raw[key] = val
 
         polling = raw.get("polling", {})
         self.poll_interval = polling.get("interval", 15)
@@ -348,16 +376,37 @@ def parse_tles(tle_text):
 
 
 async def fetch_tles():
-    """Download TLEs from CelesTrak and parse into Satrec objects."""
+    """Download TLEs from CelesTrak for multiple constellation groups."""
     global satellite_records
     try:
-        log.info("Downloading TLEs from CelesTrak...")
+        log.info("Downloading TLEs from CelesTrak (%d groups)...", len(CELESTRAK_GROUPS))
+        all_records = []
+        seen_names = set()
+
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            resp = await client.get(CELESTRAK_TLE_URL)
-            resp.raise_for_status()
-        records = parse_tles(resp.text)
-        satellite_records = records
-        log.info("TLEs loaded: %d satellites", len(records))
+            for group, label in CELESTRAK_GROUPS.items():
+                try:
+                    resp = await client.get(f"{CELESTRAK_BASE}{group}")
+                    resp.raise_for_status()
+                    records = parse_tles(resp.text)
+
+                    # Limit Starlink to avoid overwhelming
+                    if group == "starlink" and len(records) > STARLINK_MAX:
+                        records = records[:STARLINK_MAX]
+
+                    count = 0
+                    for name, sat in records:
+                        if name not in seen_names:
+                            seen_names.add(name)
+                            all_records.append((name, sat, label))
+                            count += 1
+
+                    log.info("  %s: %d satellites", label, count)
+                except Exception as e:
+                    log.warning("  Failed to fetch %s: %s", label, e)
+
+        satellite_records = all_records
+        log.info("TLEs loaded: %d total satellites", len(all_records))
     except Exception as e:
         log.error("Failed to fetch TLEs: %s", e)
 
@@ -369,7 +418,9 @@ def propagate_satellites():
                   now.hour, now.minute, now.second + now.microsecond / 1e6)
 
     results = []
-    for name, sat in satellite_records:
+    for entry in satellite_records:
+        name, sat = entry[0], entry[1]
+        group = entry[2] if len(entry) > 2 else "Unknown"
         try:
             e, r, v = sat.sgp4(jd, fr)
             if e != 0:
@@ -415,6 +466,7 @@ def propagate_satellites():
 
             results.append({
                 "name": name.strip(),
+                "group": group,
                 "latitude": round(lat_deg, 4),
                 "longitude": round(lon_deg, 4),
                 "altitude": round(alt_km, 2),

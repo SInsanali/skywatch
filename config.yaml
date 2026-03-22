@@ -5,7 +5,7 @@ polling:
   timeout: 30              # HTTP request timeout (global query is ~5MB)
 
 aisstream:
-  api_key: ""
+  api_key: ""  # set in secrets.yaml
   burst_duration: 20        # seconds to collect AIS data per burst
   cache_ttl: 60             # seconds to cache ship data
 

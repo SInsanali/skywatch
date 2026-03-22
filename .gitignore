@@ -18,3 +18,4 @@ build/
 node_modules/
 static/assets/
 static/cesium/
+secrets.yaml
