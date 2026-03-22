@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 
 export interface Satellite {
   name: string;
+  group: string;
   latitude: number;
   longitude: number;
   altitude: number; // km
