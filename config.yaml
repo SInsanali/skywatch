@@ -4,6 +4,11 @@ polling:
   interval: 15             # seconds between poll cycles
   timeout: 30              # HTTP request timeout (global query is ~5MB)
 
+aisstream:
+  api_key: ""
+  burst_duration: 20        # seconds to collect AIS data per burst
+  cache_ttl: 60             # seconds to cache ship data
+
 server:
   host: "0.0.0.0"
   port: 8078

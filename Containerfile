@@ -1,3 +1,9 @@
+FROM node:20-slim AS frontend
+
+WORKDIR /build
+COPY frontend/ .
+RUN npm install && npm run build
+
 FROM python:3.9-slim
 
 LABEL maintainer="SInsanali"
@@ -14,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY skywatch.py .
 COPY config.yaml .
-COPY static/ static/
+COPY --from=frontend /static/ static/
 
 RUN chown -R skywatch:skywatch /app
 

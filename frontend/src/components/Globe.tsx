@@ -1,0 +1,143 @@
+import { useRef, useCallback, useEffect } from 'react';
+import { Viewer } from 'resium';
+import {
+  Viewer as CesiumViewer,
+  Cartesian3,
+  Color,
+  Math as CesiumMath,
+  UrlTemplateImageryProvider,
+  IonImageryProvider,
+} from 'cesium';
+
+export type MapStyle = 'dark' | 'satellite';
+
+interface GlobeProps {
+  mapStyle: MapStyle;
+  onViewerReady?: (viewer: CesiumViewer) => void;
+  children?: React.ReactNode;
+}
+
+// Dark base map (no labels)
+const darkBaseTiles = new UrlTemplateImageryProvider({
+  url: 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}@2x.png',
+  subdomains: ['a', 'b', 'c', 'd'],
+  maximumLevel: 18,
+  tileWidth: 512,
+  tileHeight: 512,
+  credit: 'CARTO / OSM',
+});
+
+// Dark mode labels (CARTO dark labels — subtle, thin)
+const darkLabelTiles = new UrlTemplateImageryProvider({
+  url: 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
+  subdomains: ['a', 'b', 'c', 'd'],
+  maximumLevel: 18,
+  tileWidth: 512,
+  tileHeight: 512,
+  credit: 'CARTO / OSM',
+});
+
+export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps) {
+  const initialized = useRef(false);
+  const viewerRef = useRef<CesiumViewer | null>(null);
+
+  const handleViewerReady = useCallback((cesiumElement: CesiumViewer) => {
+    if (initialized.current) return;
+    initialized.current = true;
+    viewerRef.current = cesiumElement;
+
+    try {
+      const globe = cesiumElement.scene.globe;
+      globe.baseColor = Color.fromCssColorString('#0a1628');
+      globe.showGroundAtmosphere = true;
+      globe.enableLighting = true;
+
+      if (cesiumElement.scene.skyAtmosphere) {
+        cesiumElement.scene.skyAtmosphere.show = true;
+      }
+      cesiumElement.scene.fog.enabled = true;
+
+      const credit = cesiumElement.cesiumWidget.creditContainer as HTMLElement;
+      if (credit) credit.style.display = 'none';
+
+      // Render at full device pixel ratio (Retina sharpness)
+      if (window.devicePixelRatio > 1) {
+        cesiumElement.resolutionScale = window.devicePixelRatio;
+      }
+
+      cesiumElement.scene.screenSpaceCameraController.zoomFactor = 3;
+      cesiumElement.scene.screenSpaceCameraController.minimumZoomDistance = 200;
+      cesiumElement.scene.screenSpaceCameraController.maximumZoomDistance = 50_000_000;
+
+      cesiumElement.camera.setView({
+        destination: Cartesian3.fromDegrees(-40, 30, 20_000_000),
+        orientation: {
+          heading: CesiumMath.toRadians(0),
+          pitch: CesiumMath.toRadians(-90),
+          roll: 0,
+        },
+      });
+
+      applyMapStyle(cesiumElement, mapStyle);
+      if (onViewerReady) onViewerReady(cesiumElement);
+    } catch (e) {
+      console.error('Globe init error:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewerRef.current) {
+      applyMapStyle(viewerRef.current, mapStyle);
+    }
+  }, [mapStyle]);
+
+  return (
+    <Viewer
+      full
+      ref={(e: any) => {
+        if (e?.cesiumElement) handleViewerReady(e.cesiumElement);
+      }}
+      animation={false}
+      timeline={false}
+      baseLayerPicker={false}
+      geocoder={false}
+      homeButton={false}
+      sceneModePicker={false}
+      navigationHelpButton={false}
+      fullscreenButton={false}
+      selectionIndicator={false}
+      infoBox={false}
+    >
+      {children}
+    </Viewer>
+  );
+
+  async function applyMapStyle(viewer: CesiumViewer, style: MapStyle) {
+    const layers = viewer.imageryLayers;
+    layers.removeAll();
+
+    if (style === 'dark') {
+      // Dark base + Bing road overlay for English labels/borders
+      layers.addImageryProvider(darkBaseTiles);
+      try {
+        const bingRoad = await IonImageryProvider.fromAssetId(4);
+        const roadLayer = layers.addImageryProvider(bingRoad);
+        roadLayer.alpha = 0.2;
+      } catch {}
+    } else {
+      // Bing Maps Aerial with Labels (Ion asset 3) — clean, Google Earth quality
+      try {
+        const bingLabeled = await IonImageryProvider.fromAssetId(3);
+        layers.addImageryProvider(bingLabeled);
+      } catch {
+        // Fallback: ESRI satellite + CARTO labels
+        layers.addImageryProvider(new UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 19,
+          credit: 'Esri',
+        }));
+        layers.addImageryProvider(darkLabelTiles);
+      }
+    }
+  }
+}

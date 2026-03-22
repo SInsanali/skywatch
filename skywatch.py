@@ -4,17 +4,22 @@ import gzip
 import io
 import json
 import logging
+import math
 import signal
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import uvicorn
+import websockets
 import yaml
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from sgp4.api import Satrec, WGS72
+from sgp4.api import jday
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +36,35 @@ ACDB_REFRESH_HOURS = 24
 VIEWER_TIMEOUT = 60
 GLOBAL_QUERY_RADIUS = 10000  # nm — large enough to cover the entire globe
 
+CELESTRAK_TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=tle"
+TLE_REFRESH_HOURS = 6
+SAT_PROPAGATE_INTERVAL = 5  # seconds
+
+USGS_QUAKES_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson"
+QUAKES_REFRESH_SECONDS = 300  # 5 minutes
+
+AISSTREAM_WS_URL = "wss://stream.aisstream.io/v0/stream"
+
+# AIS ship type categories
+AIS_SHIP_CATEGORIES = {
+    range(60, 70): "passenger",
+    range(70, 80): "cargo",
+    range(80, 90): "tanker",
+    (30,): "fishing",
+    (35,): "military",
+    (31, 32, 52): "tug",
+    (36, 37): "pleasure",
+    range(40, 50): "highspeed",
+}
+
+def classify_ship_type(ais_type):
+    if not ais_type:
+        return "other"
+    for key, cat in AIS_SHIP_CATEGORIES.items():
+        if ais_type in key:
+            return cat
+    return "other"
+
 
 class Config:
     def __init__(self):
@@ -43,6 +77,11 @@ class Config:
         polling = raw.get("polling", {})
         self.poll_interval = polling.get("interval", 15)
         self.timeout = polling.get("timeout", 20)
+
+        ais = raw.get("aisstream", {})
+        self.ais_api_key = ais.get("api_key", "")
+        self.ais_burst_duration = ais.get("burst_duration", 20)
+        self.ais_cache_ttl = ais.get("cache_ttl", 60)
 
         server = raw.get("server", {})
         self.host = server.get("host", "0.0.0.0")
@@ -60,6 +99,11 @@ aircraft_db = {}
 airline_db = {}
 airports = []
 last_viewer_heartbeat = 0
+
+satellite_records = []  # list of (name, Satrec) tuples from parsed TLEs
+satellite_state = []  # latest propagated satellite positions
+earthquake_state = {}  # cached USGS GeoJSON
+ship_state = {"ships": [], "timestamp": 0}  # cached AIS ship data
 
 
 def has_active_viewer():
@@ -282,6 +326,247 @@ def parse_v2_aircraft(ac_list):
     return aircraft
 
 
+def parse_tles(tle_text):
+    """Parse TLE text into list of (name, Satrec) tuples."""
+    lines = [l.strip() for l in tle_text.strip().splitlines() if l.strip()]
+    records = []
+    i = 0
+    while i + 2 < len(lines):
+        name = lines[i]
+        line1 = lines[i + 1]
+        line2 = lines[i + 2]
+        if not line1.startswith("1 ") or not line2.startswith("2 "):
+            i += 1
+            continue
+        try:
+            sat = Satrec.twoline2rv(line1, line2, WGS72)
+            records.append((name, sat))
+        except Exception:
+            pass
+        i += 3
+    return records
+
+
+async def fetch_tles():
+    """Download TLEs from CelesTrak and parse into Satrec objects."""
+    global satellite_records
+    try:
+        log.info("Downloading TLEs from CelesTrak...")
+        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+            resp = await client.get(CELESTRAK_TLE_URL)
+            resp.raise_for_status()
+        records = parse_tles(resp.text)
+        satellite_records = records
+        log.info("TLEs loaded: %d satellites", len(records))
+    except Exception as e:
+        log.error("Failed to fetch TLEs: %s", e)
+
+
+def propagate_satellites():
+    """Propagate all satellite positions to the current time using SGP4."""
+    now = datetime.now(timezone.utc)
+    jd, fr = jday(now.year, now.month, now.day,
+                  now.hour, now.minute, now.second + now.microsecond / 1e6)
+
+    results = []
+    for name, sat in satellite_records:
+        try:
+            e, r, v = sat.sgp4(jd, fr)
+            if e != 0:
+                continue
+            x, y, z = r  # km in TEME
+            vx, vy, vz = v  # km/s in TEME
+
+            # Convert TEME (ECI) to geodetic lat/lon/alt
+            # Earth radius in km (WGS72)
+            a_earth = 6378.135
+
+            r_mag = math.sqrt(x * x + y * y + z * z)
+            lon_rad = math.atan2(y, x)
+
+            # Approximate GMST for ECI -> ECEF rotation
+            d = jd - 2451545.0 + fr
+            gmst = math.fmod(280.46061837 + 360.98564736629 * d, 360.0)
+            gmst_rad = math.radians(gmst)
+
+            # Rotate to ECEF
+            x_ecef = x * math.cos(gmst_rad) + y * math.sin(gmst_rad)
+            y_ecef = -x * math.sin(gmst_rad) + y * math.cos(gmst_rad)
+            z_ecef = z
+
+            lon_deg = math.degrees(math.atan2(y_ecef, x_ecef))
+            lat_rad = math.atan2(z_ecef, math.sqrt(x_ecef ** 2 + y_ecef ** 2))
+
+            # Iterative lat for oblate earth
+            e2 = 0.006694317778
+            for _ in range(5):
+                sin_lat = math.sin(lat_rad)
+                N = a_earth / math.sqrt(1 - e2 * sin_lat ** 2)
+                lat_rad = math.atan2(z_ecef + e2 * N * sin_lat,
+                                     math.sqrt(x_ecef ** 2 + y_ecef ** 2))
+
+            lat_deg = math.degrees(lat_rad)
+            sin_lat = math.sin(lat_rad)
+            cos_lat = math.cos(lat_rad)
+            N = a_earth / math.sqrt(1 - e2 * sin_lat ** 2)
+            alt_km = math.sqrt(x_ecef ** 2 + y_ecef ** 2) / cos_lat - N if abs(cos_lat) > 1e-10 else abs(z_ecef) / abs(sin_lat) - N * (1 - e2)
+
+            velocity_km_s = math.sqrt(vx * vx + vy * vy + vz * vz)
+
+            results.append({
+                "name": name.strip(),
+                "latitude": round(lat_deg, 4),
+                "longitude": round(lon_deg, 4),
+                "altitude": round(alt_km, 2),
+                "velocity": round(velocity_km_s, 4),
+            })
+        except Exception:
+            continue
+
+    return results
+
+
+async def refresh_tles():
+    """Periodically re-fetch TLEs from CelesTrak."""
+    await fetch_tles()
+    while True:
+        await asyncio.sleep(TLE_REFRESH_HOURS * 3600)
+        await fetch_tles()
+
+
+async def propagate_satellites_loop():
+    """Propagate satellite positions every few seconds."""
+    global satellite_state
+    while True:
+        if satellite_records:
+            satellite_state = await asyncio.get_event_loop().run_in_executor(
+                None, propagate_satellites
+            )
+        await asyncio.sleep(SAT_PROPAGATE_INTERVAL)
+
+
+async def fetch_earthquakes():
+    """Download earthquake data from USGS."""
+    global earthquake_state
+    try:
+        log.info("Downloading earthquake data from USGS...")
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            resp = await client.get(USGS_QUAKES_URL)
+            resp.raise_for_status()
+        earthquake_state = resp.json()
+        count = len(earthquake_state.get("features", []))
+        log.info("Earthquake data loaded: %d events", count)
+    except Exception as e:
+        log.error("Failed to fetch earthquake data: %s", e)
+
+
+async def refresh_earthquakes():
+    """Periodically re-fetch earthquake data."""
+    await fetch_earthquakes()
+    while True:
+        await asyncio.sleep(QUAKES_REFRESH_SECONDS)
+        await fetch_earthquakes()
+
+
+async def collect_ais_burst():
+    """Connect to AISStream WebSocket, collect ship data for a burst duration."""
+    global ship_state
+    if not config.ais_api_key:
+        return
+
+    ships = {}
+    try:
+        async with websockets.connect(AISSTREAM_WS_URL) as ws:
+            sub = json.dumps({
+                "APIKey": config.ais_api_key,
+                "BoundingBoxes": [[[-90, -180], [90, 180]]],
+                "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
+            })
+            await ws.send(sub)
+
+            deadline = time.time() + config.ais_burst_duration
+            while time.time() < deadline:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=2)
+                    msg = json.loads(raw)
+                except asyncio.TimeoutError:
+                    continue
+                except Exception:
+                    break
+
+                meta = msg.get("MetaData", {})
+                mmsi = meta.get("MMSI")
+                if not mmsi:
+                    continue
+
+                lat = meta.get("latitude", 0)
+                lon = meta.get("longitude", 0)
+                if abs(lat) < 0.01 and abs(lon) < 0.01:
+                    continue
+                if lat < -90 or lat > 90 or lon < -180 or lon > 180:
+                    continue
+
+                ship = ships.get(mmsi, {"mmsi": mmsi})
+                ship["name"] = meta.get("ShipName", "").strip() or ship.get("name", "")
+                ship["latitude"] = lat
+                ship["longitude"] = lon
+                ship["timestamp"] = meta.get("time_utc", "")
+
+                msg_type = msg.get("MessageType", "")
+                message = msg.get("Message", {})
+
+                if msg_type == "PositionReport":
+                    pr = message.get("PositionReport", {})
+                    ship["sog"] = pr.get("Sog", 0)
+                    cog = pr.get("Cog", 360)
+                    ship["cog"] = cog if cog < 360 else None
+                    hdg = pr.get("TrueHeading", 511)
+                    ship["heading"] = hdg if hdg != 511 else ship.get("cog")
+                    ship["nav_status"] = pr.get("NavigationalStatus", 15)
+                elif msg_type == "ShipStaticData":
+                    sd = message.get("ShipStaticData", {})
+                    ship["ship_type"] = sd.get("Type", 0)
+                    ship["category"] = classify_ship_type(sd.get("Type", 0))
+                    ship["imo"] = sd.get("ImoNumber", 0)
+                    ship["callsign"] = sd.get("CallSign", "").strip()
+                    ship["destination"] = sd.get("Destination", "").strip()
+                    dim = sd.get("Dimension", {})
+                    if dim:
+                        ship["length"] = (dim.get("A", 0) or 0) + (dim.get("B", 0) or 0)
+                        ship["width"] = (dim.get("C", 0) or 0) + (dim.get("D", 0) or 0)
+
+                ships[mmsi] = ship
+
+    except Exception as e:
+        log.error("AIS burst collection failed: %s", e)
+
+    # Filter to moving vessels only
+    moving = []
+    for s in ships.values():
+        sog = s.get("sog", 0)
+        nav = s.get("nav_status", 15)
+        if sog > 0.5 and nav not in (1, 5, 6):  # not anchored/moored/aground
+            if "category" not in s:
+                s["category"] = classify_ship_type(s.get("ship_type", 0))
+            moving.append(s)
+
+    ship_state = {"ships": moving, "timestamp": int(time.time())}
+    log.info("AIS burst: %d total, %d moving ships", len(ships), len(moving))
+
+
+async def refresh_ships():
+    """Periodically collect AIS ship data."""
+    if not config.ais_api_key:
+        log.info("No AISStream API key configured, skipping ship tracking")
+        return
+    # First burst immediately on startup
+    await collect_ais_burst()
+    while True:
+        await asyncio.sleep(config.ais_cache_ttl)
+        if has_active_viewer():
+            await collect_ais_burst()
+
+
 async def poll_aircraft():
     interval = config.poll_interval
     was_idle = True
@@ -332,11 +617,15 @@ async def lifespan(app):
     await load_airlines()
     db_task = asyncio.create_task(refresh_aircraft_db())
     poll_task = asyncio.create_task(poll_aircraft())
+    tle_task = asyncio.create_task(refresh_tles())
+    sat_task = asyncio.create_task(propagate_satellites_loop())
+    quake_task = asyncio.create_task(refresh_earthquakes())
+    ship_task = asyncio.create_task(refresh_ships())
     log.info("Skywatch started on port %d (source: airplanes.live)", config.port)
     yield
-    poll_task.cancel()
-    db_task.cancel()
-    for t in [poll_task, db_task]:
+    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task]:
+        t.cancel()
+    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task]:
         try:
             await t
         except asyncio.CancelledError:
@@ -368,8 +657,26 @@ async def health():
         "airports_loaded": len(airports),
         "aircraft_db_loaded": len(aircraft_db),
         "airline_db_loaded": len(airline_db),
+        "satellites_tracked": len(satellite_state),
+        "earthquakes_loaded": len(earthquake_state.get("features", [])),
+        "ships_tracked": len(ship_state.get("ships", [])),
         "has_active_viewer": has_active_viewer(),
     }
+
+
+@app.get("/api/satellites")
+async def get_satellites():
+    return satellite_state
+
+
+@app.get("/api/earthquakes")
+async def get_earthquakes():
+    return earthquake_state
+
+
+@app.get("/api/ships")
+async def get_ships():
+    return ship_state
 
 
 @app.post("/api/heartbeat")
