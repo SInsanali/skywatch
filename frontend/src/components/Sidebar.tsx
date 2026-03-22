@@ -4,6 +4,7 @@ import { MapStyle } from './Globe';
 import { Satellite } from '../hooks/useSatellites';
 import { Earthquake } from '../hooks/useEarthquakes';
 import { Ship } from '../hooks/useShips';
+import type { SatelliteCategory } from '../App';
 
 type RegionKey = 'global' | 'na' | 'eu' | 'asia' | 'me' | 'af' | 'sa' | 'oc';
 
@@ -55,6 +56,11 @@ interface SidebarProps {
   shipCount: number;
   showSatFootprint: boolean;
   onSatFootprintChange: (val: boolean) => void;
+  satFilters: Record<SatelliteCategory, boolean>;
+  onSatFilterChange: (cat: SatelliteCategory, val: boolean) => void;
+  satCategoryCounts: Record<SatelliteCategory, number>;
+  nearbySats: Satellite[];
+  onSelectSat: (sat: Satellite) => void;
   onFlyToRegion: (region: RegionKey, bounds?: RegionBounds) => void;
 }
 
@@ -64,6 +70,37 @@ const catLabels: Record<AircraftCategory, string> = {
   military: 'Military',
   ground: 'On Ground',
 };
+
+const satCatLabels: Record<SatelliteCategory, string> = {
+  earthObs: 'Earth Observation',
+  comms: 'Communications',
+  nav: 'Navigation',
+  science: 'Space Science',
+  stations: 'Space Stations',
+  military: 'Military',
+};
+
+const satCatOrder: SatelliteCategory[] = ['earthObs', 'comms', 'nav', 'science', 'stations', 'military'];
+
+const satCatColors: Record<SatelliteCategory, string> = {
+  earthObs: '#4fc3f7',
+  comms: '#b388ff',
+  nav: '#69f0ae',
+  science: '#ffd54f',
+  stations: '#ffffff',
+  military: '#ef5350',
+};
+
+const groupToCat: Record<string, SatelliteCategory> = {
+  'Weather': 'earthObs', 'NOAA': 'earthObs', 'GOES': 'earthObs', 'Planet Labs': 'earthObs',
+  'Starlink': 'comms', 'Iridium': 'comms', 'Globalstar': 'comms', 'OneWeb': 'comms',
+  'GPS': 'nav', 'Galileo': 'nav',
+  'Science': 'science', 'Space Stations': 'stations', 'Military': 'military',
+};
+
+function satGroupColor(group: string): string {
+  return satCatColors[groupToCat[group] || 'comms'];
+}
 
 function Field({ label, value }: { label: string; value: string }) {
   return <div><span style={styles.label}>{label}</span><br/><span style={{ fontWeight: 600, fontSize: 13 }}>{value}</span></div>;
@@ -92,6 +129,20 @@ function fpmFromMs(ms: number | null): string {
   if (ms == null) return '--';
   const fpm = Math.round(ms * 196.85);
   return (fpm > 0 ? '+' : '') + fpm.toLocaleString() + ' fpm';
+}
+
+function Caret({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <span
+      onClick={e => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      style={{
+        fontSize: 8, cursor: 'pointer', transition: 'transform 0.15s',
+        transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+        color: '#6b7685', userSelect: 'none', padding: '2px 0',
+        display: 'inline-flex', alignItems: 'center',
+      }}
+    >&#9660;</span>
+  );
 }
 
 function TopTypes({ flights, filters }: { flights: Aircraft[]; filters: Record<AircraftCategory, boolean> }) {
@@ -138,10 +189,14 @@ export default function Sidebar({
   satelliteCount, earthquakeCount,
   selectedSat, selectedQuake, selectedShip,
   showShips, onShipsChange, shipCount, showSatFootprint, onSatFootprintChange,
-  onFlyToRegion,
+  satFilters, onSatFilterChange, satCategoryCounts,
+  nearbySats, onSelectSat, onFlyToRegion,
 }: SidebarProps) {
   const [search, setSearch] = useState('');
   const [activeRegion, setActiveRegion] = useState<RegionKey>('global');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  const toggle = (key: string) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
   const counts: Record<AircraftCategory, number> = { airline: 0, private: 0, military: 0, ground: 0 };
   for (const ac of flights) counts[classifyAircraft(ac)]++;
@@ -246,16 +301,37 @@ export default function Sidebar({
       {selectedSat && (
         <div style={styles.detail}>
           <div style={styles.detailHeader}>
-            <span style={{ ...styles.detailCallsign, color: '#b388ff' }}>{selectedSat.name}</span>
+            <span style={{ ...styles.detailCallsign, color: satGroupColor(selectedSat.group) }}>{selectedSat.name}</span>
             <button onClick={onClose} style={styles.closeBtn}>&times;</button>
           </div>
-          <div style={styles.detailSub}>Satellite</div>
+          <div style={styles.detailSub}>{selectedSat.group || 'Satellite'}</div>
           <div style={styles.detailGrid}>
             <Field label="ALT" value={Math.round(selectedSat.altitude).toLocaleString() + ' km'} />
             <Field label="SPEED" value={selectedSat.velocity.toFixed(1) + ' km/s'} />
             <Field label="LAT" value={selectedSat.latitude.toFixed(2) + '\u00B0'} />
             <Field label="LON" value={selectedSat.longitude.toFixed(2) + '\u00B0'} />
           </div>
+          {nearbySats.length > 0 && (
+            <div style={styles.fieldList}>
+              <div style={{ fontSize: 10, color: '#6b7685', textTransform: 'uppercase' as const, letterSpacing: 0.4, marginBottom: 4 }}>
+                {selectedSat.group} constellation ({nearbySats.length})
+              </div>
+              <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                {nearbySats.map(ns => (
+                  <div
+                    key={ns.name}
+                    onClick={() => onSelectSat(ns)}
+                    style={styles.nearbyRow}
+                    onMouseEnter={e => (e.currentTarget.style.background = '#1a2230')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ color: satGroupColor(ns.group), fontSize: 11, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{ns.name}</span>
+                    <span style={{ color: '#6b7685', fontSize: 10 }}>{Math.round(ns.altitude)} km</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -318,76 +394,97 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={styles.section}>
-        <div style={{ ...styles.sectionTitle, display: 'flex', alignItems: 'center' }}>
-          Aircraft
-          <span
-            onClick={() => {
-              const keys = Object.keys(catLabels) as AircraftCategory[];
-              const allOn = keys.every(k => filters[k]);
-              keys.forEach(k => onFilterChange(k, !allOn));
-            }}
-            style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 500, color: '#4a90d9', cursor: 'pointer', textTransform: 'none' as const, letterSpacing: 0 }}
-          >
-            {(Object.keys(catLabels) as AircraftCategory[]).every(k => filters[k]) ? 'Deselect all' : 'Select all'}
-          </span>
-        </div>
-        {(Object.keys(catLabels) as AircraftCategory[]).map(cat => (
-          <label key={cat} style={styles.filterRow}>
-            <input
-              type="checkbox"
-              checked={filters[cat]}
-              onChange={e => onFilterChange(cat, e.target.checked)}
-              style={styles.checkbox}
-            />
-            <span style={{ ...styles.dot, background: categoryColors[cat] }} />
-            <span style={styles.filterLabel}>{catLabels[cat]}</span>
-            <span style={styles.filterCount}>{counts[cat]}</span>
-          </label>
-        ))}
-      </div>
-
-      {/* Top Aircraft Types */}
-      <TopTypes flights={flights} filters={filters} />
-
-      {/* Layers */}
+      {/* Layers — unified collapsible groups */}
       <div style={styles.section}>
         <div style={styles.sectionTitle}>Layers</div>
-        <label style={styles.filterRow}>
-          <input type="checkbox" checked={showAircraft} onChange={e => onAircraftChange(e.target.checked)} style={styles.checkbox} />
-          <span style={{ ...styles.dot, background: '#f0c040' }} />
-          <span style={styles.filterLabel}>Aircraft</span>
-          <span style={styles.filterCount}>{total}</span>
-        </label>
-        <label style={styles.filterRow}>
-          <input type="checkbox" checked={showTrails} onChange={e => onTrailsChange(e.target.checked)} style={styles.checkbox} />
-          <span style={{ ...styles.dot, background: '#58a6ff' }} />
-          <span style={styles.filterLabel}>Flight Trails</span>
-        </label>
-        <label style={styles.filterRow}>
-          <input type="checkbox" checked={showSatellites} onChange={e => onSatellitesChange(e.target.checked)} style={styles.checkbox} />
-          <span style={{ ...styles.dot, background: '#b388ff' }} />
-          <span style={styles.filterLabel}>Satellites</span>
-          <span style={styles.filterCount}>{satelliteCount}</span>
-        </label>
-        <label style={{ ...styles.filterRow, paddingLeft: 28 }}>
-          <input type="checkbox" checked={showSatFootprint} onChange={e => onSatFootprintChange(e.target.checked)} style={styles.checkbox} />
-          <span style={styles.filterLabel}>Scan Area</span>
-        </label>
-        <label style={styles.filterRow}>
+
+        {/* Aircraft */}
+        <div>
+          <div style={styles.filterRow}>
+            <input type="checkbox" checked={showAircraft} onChange={e => onAircraftChange(e.target.checked)} style={styles.checkbox} />
+            <Caret open={!!expanded.aircraft} onClick={() => toggle('aircraft')} />
+            <span style={{ ...styles.dot, background: '#f0c040' }} />
+            <span style={styles.filterLabel}>Aircraft</span>
+            <span style={styles.filterCount}>{total.toLocaleString()}</span>
+          </div>
+          {expanded.aircraft && (
+            <div style={styles.subFilters}>
+              <div style={styles.toggleAll} onClick={() => {
+                const keys = Object.keys(catLabels) as AircraftCategory[];
+                const allOn = keys.every(k => filters[k]);
+                keys.forEach(k => onFilterChange(k, !allOn));
+              }}>
+                {(Object.keys(catLabels) as AircraftCategory[]).every(k => filters[k]) ? 'Deselect all' : 'Select all'}
+              </div>
+              {(Object.keys(catLabels) as AircraftCategory[]).map(cat => (
+                <label key={cat} style={styles.subRow}>
+                  <input type="checkbox" checked={filters[cat]} onChange={e => onFilterChange(cat, e.target.checked)} style={styles.checkbox} />
+                  <span style={{ ...styles.dot, background: categoryColors[cat] }} />
+                  <span style={styles.filterLabel}>{catLabels[cat]}</span>
+                  <span style={styles.filterCount}>{counts[cat].toLocaleString()}</span>
+                </label>
+              ))}
+              <label style={styles.subRow}>
+                <input type="checkbox" checked={showTrails} onChange={e => onTrailsChange(e.target.checked)} style={styles.checkbox} />
+                <span style={{ ...styles.dot, background: '#58a6ff' }} />
+                <span style={styles.filterLabel}>Flight Trails</span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Satellites */}
+        <div>
+          <div style={styles.filterRow}>
+            <input type="checkbox" checked={showSatellites} onChange={e => onSatellitesChange(e.target.checked)} style={styles.checkbox} />
+            <Caret open={!!expanded.satellites} onClick={() => toggle('satellites')} />
+            <span style={{ ...styles.dot, background: '#b388ff' }} />
+            <span style={styles.filterLabel}>Satellites</span>
+            <span style={styles.filterCount}>{satelliteCount.toLocaleString()}</span>
+          </div>
+          {expanded.satellites && (
+            <div style={styles.subFilters}>
+              <div style={styles.toggleAll} onClick={() => {
+                const allOn = satCatOrder.every(k => satFilters[k]);
+                satCatOrder.forEach(k => onSatFilterChange(k, !allOn));
+              }}>
+                {satCatOrder.every(k => satFilters[k]) ? 'Deselect all' : 'Select all'}
+              </div>
+              {satCatOrder.map(cat => (
+                <label key={cat} style={styles.subRow}>
+                  <input type="checkbox" checked={satFilters[cat]} onChange={e => onSatFilterChange(cat, e.target.checked)} style={styles.checkbox} />
+                  <span style={{ ...styles.dot, background: satCatColors[cat] }} />
+                  <span style={styles.filterLabel}>{satCatLabels[cat]}</span>
+                  <span style={styles.filterCount}>{satCategoryCounts[cat].toLocaleString()}</span>
+                </label>
+              ))}
+              <label style={styles.subRow}>
+                <input type="checkbox" checked={showSatFootprint} onChange={e => onSatFootprintChange(e.target.checked)} style={styles.checkbox} />
+                <span style={styles.filterLabel}>Scan Cones</span>
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* Earthquakes */}
+        <div style={styles.filterRow}>
           <input type="checkbox" checked={showEarthquakes} onChange={e => onEarthquakesChange(e.target.checked)} style={styles.checkbox} />
           <span style={{ ...styles.dot, background: '#ff9800' }} />
           <span style={styles.filterLabel}>Earthquakes</span>
           <span style={styles.filterCount}>{earthquakeCount}</span>
-        </label>
-        <label style={styles.filterRow}>
+        </div>
+
+        {/* Ships */}
+        <div style={styles.filterRow}>
           <input type="checkbox" checked={showShips} onChange={e => onShipsChange(e.target.checked)} style={styles.checkbox} />
           <span style={{ ...styles.dot, background: '#8bc34a' }} />
           <span style={styles.filterLabel}>Ships</span>
           <span style={styles.filterCount}>{shipCount}</span>
-        </label>
+        </div>
       </div>
+
+      {/* Top Aircraft Types */}
+      <TopTypes flights={flights} filters={filters} />
 
       {/* Map Style */}
       <div style={styles.section}>
@@ -441,7 +538,18 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px',
     cursor: 'pointer', borderRadius: 6, marginBottom: 1,
   },
-  checkbox: { width: 14, height: 14, accentColor: '#4a90d9' },
+  subFilters: {
+    paddingLeft: 16, borderLeft: '1px solid #1a2230', marginLeft: 18, marginBottom: 4,
+  },
+  subRow: {
+    display: 'flex', alignItems: 'center', gap: 8, padding: '3px 8px',
+    cursor: 'pointer', borderRadius: 6, marginBottom: 1, fontSize: 12,
+  },
+  toggleAll: {
+    fontSize: 10, fontWeight: 500, color: '#4a90d9', cursor: 'pointer',
+    padding: '2px 8px', marginBottom: 2, textAlign: 'right' as const,
+  },
+  checkbox: { width: 14, height: 14, accentColor: '#4a90d9', flexShrink: 0 },
   dot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
   filterLabel: { flex: 1, fontWeight: 500 },
   filterCount: { color: '#3d4654', fontSize: 11, fontVariantNumeric: 'tabular-nums', fontWeight: 600 },
@@ -466,6 +574,10 @@ const styles: Record<string, React.CSSProperties> = {
   label: { fontSize: 10, color: '#6b7685', textTransform: 'uppercase' as const, letterSpacing: 0.4 },
   detailField: { fontSize: 12, color: '#6b7685', marginTop: 4 },
   fieldList: { marginTop: 10, borderTop: '1px solid #1a2230', paddingTop: 8 },
+  nearbyRow: {
+    display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px',
+    cursor: 'pointer', borderRadius: 4, transition: 'background 0.1s',
+  } as React.CSSProperties,
   fr24Link: {
     display: 'inline-block', marginTop: 10, padding: '5px 12px',
     background: '#4a90d9', color: '#fff', textDecoration: 'none',

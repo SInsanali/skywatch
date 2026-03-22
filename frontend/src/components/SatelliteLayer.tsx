@@ -16,6 +16,17 @@ import { Satellite } from '../hooks/useSatellites';
 
 const ISS_NAMES = ['ISS (ZARYA)', 'ISS'];
 
+const EARTH_RADIUS_M = 6_371_000;
+
+// Geometric ground coverage radius from orbital altitude
+function getFootprintRadius(altKm: number): number {
+  const altM = altKm * 1000;
+  const cosAngle = EARTH_RADIUS_M / (EARTH_RADIUS_M + altM);
+  const groundArc = EARTH_RADIUS_M * Math.acos(cosAngle);
+  // Use 40% of the geometric max — looks cleaner and represents the usable coverage area
+  return Math.min(groundArc * 0.4, 5_000_000);
+}
+
 // Satellite with solar panels
 function makeSatSvg(color: string, size: number = 28): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 28 28">
@@ -66,8 +77,47 @@ function makeIssSvg(size: number = 36): string {
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
 
-const satIcon = makeSatSvg('#b388ff');
 const issIcon = makeIssSvg();
+
+// Color per satellite group
+const SAT_GROUP_COLORS: Record<string, string> = {
+  'Weather': '#4fc3f7', 'NOAA': '#4fc3f7', 'GOES': '#4fc3f7', 'Planet Labs': '#4fc3f7',
+  'Starlink': '#b388ff', 'Iridium': '#b388ff', 'Globalstar': '#b388ff', 'OneWeb': '#b388ff',
+  'GPS': '#69f0ae', 'Galileo': '#69f0ae',
+  'Science': '#ffd54f',
+  'Space Stations': '#ffffff',
+  'Military': '#ef5350',
+};
+const DEFAULT_SAT_COLOR = '#b388ff';
+const LEO_CEILING = 2000; // km — anything above this gets the high-orbit style
+
+function satColor(group: string): string {
+  return SAT_GROUP_COLORS[group] || DEFAULT_SAT_COLOR;
+}
+
+// Diamond marker for high-orbit satellites
+function makeDiamondSvg(color: string, size: number = 20): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 20 20">
+    <polygon points="10,2 18,10 10,18 2,10" fill="none" stroke="${color}" stroke-width="1.2" opacity="0.8"/>
+    <circle cx="10" cy="10" r="2" fill="${color}"/>
+  </svg>`;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+const diamondCache = new Map<string, string>();
+function getDiamond(color: string): string {
+  let icon = diamondCache.get(color);
+  if (!icon) { icon = makeDiamondSvg(color); diamondCache.set(color, icon); }
+  return icon;
+}
+
+// Cache generated SVGs per color
+const iconCache = new Map<string, string>();
+function getSatIcon(color: string): string {
+  let icon = iconCache.get(color);
+  if (!icon) { icon = makeSatSvg(color); iconCache.set(color, icon); }
+  return icon;
+}
 
 function makeGlowSvg(color: string, size: number = 48): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
@@ -77,16 +127,27 @@ function makeGlowSvg(color: string, size: number = 48): string {
   </svg>`;
   return `data:image/svg+xml;base64,${btoa(svg)}`;
 }
-const satGlow = makeGlowSvg('#b388ff');
+
+const glowCache = new Map<string, string>();
+function getSatGlow(color: string): string {
+  let glow = glowCache.get(color);
+  if (!glow) { glow = makeGlowSvg(color); glowCache.set(color, glow); }
+  return glow;
+}
+
+function findGroupSatellites(selected: Satellite, all: Satellite[]): Satellite[] {
+  return all.filter(s => s.name !== selected.name && s.group === selected.group);
+}
 
 interface SatelliteLayerProps {
   satellites: Satellite[];
   selected: Satellite | null;
   onSelect: (sat: Satellite | null) => void;
   showFootprint: boolean;
+  onNearbySatellites?: (nearby: Satellite[]) => void;
 }
 
-export default function SatelliteLayer({ satellites, selected, onSelect, showFootprint }: SatelliteLayerProps) {
+export default function SatelliteLayer({ satellites, selected, onSelect, showFootprint, onNearbySatellites }: SatelliteLayerProps) {
   const { viewer } = useCesium();
   const bbRef = useRef<BillboardCollection | null>(null);
   const labelRef = useRef<LabelCollection | null>(null);
@@ -121,6 +182,7 @@ export default function SatelliteLayer({ satellites, selected, onSelect, showFoo
       if (picked?.primitive?._skywatch_satellite) {
         const sat = picked.primitive._skywatch_satellite as Satellite;
         tooltip.textContent = `${sat.name} (${Math.round(sat.altitude)} km)`;
+        tooltip.style.color = satColor(sat.group);
         tooltip.style.display = 'block';
         tooltip.style.left = (move.endPosition.x + 14) + 'px';
         tooltip.style.top = (move.endPosition.y - 28) + 'px';
@@ -147,51 +209,86 @@ export default function SatelliteLayer({ satellites, selected, onSelect, showFoo
     bbCol.removeAll();
     lblCol.removeAll();
 
+    // Find same-constellation satellites for the selected one
+    const nearby = selected ? findGroupSatellites(selected, satellites) : [];
+    const nearbyNames = new Set(nearby.map(s => s.name));
+    if (onNearbySatellites) onNearbySatellites(nearby);
+
     for (const sat of satellites) {
       const isIss = ISS_NAMES.includes(sat.name);
       const isSelected = selected?.name === sat.name;
+      const isNearby = nearbyNames.has(sat.name);
       const altMeters = sat.altitude * 1000;
       const position = Cartesian3.fromDegrees(sat.longitude, sat.latitude, altMeters);
+      const color = satColor(sat.group);
+      const isHighOrbit = sat.altitude > LEO_CEILING;
 
-      if (isSelected) {
+      if (isSelected || isNearby) {
         bbCol.add({
           position,
-          image: satGlow,
-          scale: 1.0,
+          image: getSatGlow(color),
+          scale: isSelected ? 1.0 : 0.7,
           verticalOrigin: VerticalOrigin.CENTER,
           horizontalOrigin: HorizontalOrigin.CENTER,
           scaleByDistance: new NearFarScalar(1e5, 2.0, 5e7, 0.5),
         });
       }
 
-      const bb = bbCol.add({
-        position,
-        image: isIss ? issIcon : satIcon,
-        scale: isSelected ? 1.2 : isIss ? 1.0 : 0.7,
-        verticalOrigin: VerticalOrigin.CENTER,
-        horizontalOrigin: HorizontalOrigin.CENTER,
-        scaleByDistance: new NearFarScalar(1e5, 1.5, 5e7, 0.4),
-        translucencyByDistance: new NearFarScalar(1e5, 1.0, 5e7, 0.6),
-      });
-      (bb as any)._skywatch_satellite = sat;
+      if (isHighOrbit) {
+        // High-orbit: diamond marker + always-on label
+        const bb = bbCol.add({
+          position,
+          image: getDiamond(color),
+          scale: isSelected ? 1.3 : 1.0,
+          verticalOrigin: VerticalOrigin.CENTER,
+          horizontalOrigin: HorizontalOrigin.CENTER,
+          scaleByDistance: new NearFarScalar(1e6, 1.2, 1e8, 0.5),
+        });
+        (bb as any)._skywatch_satellite = sat;
 
-      // Label for ISS (always visible)
-      if (isIss) {
+        const label = sat.name.length > 18 ? sat.name.slice(0, 16) + '..' : sat.name;
         lblCol.add({
           position,
-          text: 'ISS',
-          font: '12px -apple-system, sans-serif',
-          fillColor: Color.WHITE,
+          text: label,
+          font: isSelected ? '11px monospace' : '10px monospace',
+          fillColor: isSelected ? Color.WHITE : Color.fromCssColorString(color).withAlpha(0.85),
           outlineColor: Color.BLACK,
           outlineWidth: 2,
           style: LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset: { x: 0, y: -18 } as any,
-          scaleByDistance: new NearFarScalar(1e5, 1.0, 5e7, 0.5),
+          pixelOffset: { x: 14, y: 0 } as any,
+          horizontalOrigin: HorizontalOrigin.LEFT,
+          scaleByDistance: new NearFarScalar(1e6, 1.0, 1e8, 0.45),
         });
+      } else {
+        // LEO: satellite icon
+        const bb = bbCol.add({
+          position,
+          image: isIss ? issIcon : getSatIcon(color),
+          scale: isSelected ? 1.2 : isNearby ? 1.0 : isIss ? 1.0 : 0.7,
+          verticalOrigin: VerticalOrigin.CENTER,
+          horizontalOrigin: HorizontalOrigin.CENTER,
+          scaleByDistance: new NearFarScalar(1e5, 1.5, 5e7, 0.4),
+          translucencyByDistance: new NearFarScalar(1e5, 1.0, 5e7, 0.45),
+        });
+        (bb as any)._skywatch_satellite = sat;
+
+        if (isIss || isSelected || isNearby) {
+          lblCol.add({
+            position,
+            text: isIss ? 'ISS' : sat.name.length > 16 ? sat.name.slice(0, 14) + '..' : sat.name,
+            font: (isSelected || isIss) ? '12px -apple-system, sans-serif' : '10px -apple-system, sans-serif',
+            fillColor: isSelected ? Color.WHITE : Color.fromCssColorString(color).withAlpha(0.8),
+            outlineColor: Color.BLACK,
+            outlineWidth: 2,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: { x: 0, y: -18 } as any,
+            scaleByDistance: new NearFarScalar(1e5, 1.0, 5e7, 0.5),
+          });
+        }
       }
     }
 
-    // Scan cone + footprint — for selected satellite
+    // Scan cones + footprints — for selected AND nearby satellites
     try {
       for (const ent of footprintEntities.current) {
         viewer.entities.remove(ent);
@@ -199,40 +296,42 @@ export default function SatelliteLayer({ satellites, selected, onSelect, showFoo
     } catch {}
     footprintEntities.current = [];
 
-    if (selected && showFootprint) {
-      const altM = selected.altitude * 1000;
-      const scanRadiusM = selected.altitude * 900;
+    if (showFootprint && selected) {
+      const sat = satellites.find(s => s.name === selected.name) ?? selected;
+      const color = satColor(sat.group);
+      const altM = sat.altitude * 1000;
+      const radiusM = getFootprintRadius(sat.altitude);
 
       try {
-        // Ground footprint circle
         const footprint = viewer.entities.add({
-          position: Cartesian3.fromDegrees(selected.longitude, selected.latitude, 0),
+          position: Cartesian3.fromDegrees(sat.longitude, sat.latitude, 0),
           ellipse: new (window as any).Cesium.EllipseGraphics({
-            semiMajorAxis: scanRadiusM,
-            semiMinorAxis: scanRadiusM,
-            material: Color.fromCssColorString('#b388ff').withAlpha(0.12),
+            semiMajorAxis: radiusM,
+            semiMinorAxis: radiusM,
+            material: Color.fromCssColorString(color).withAlpha(0.15),
             outline: true,
-            outlineColor: Color.fromCssColorString('#b388ff').withAlpha(0.4),
+            outlineColor: Color.fromCssColorString(color).withAlpha(0.5),
             outlineWidth: 1,
             height: 0,
           }),
         });
         footprintEntities.current.push(footprint);
 
-        // 3D cone from satellite to ground
-        const cone = viewer.entities.add({
-          position: Cartesian3.fromDegrees(selected.longitude, selected.latitude, altM / 2),
-          cylinder: new (window as any).Cesium.CylinderGraphics({
-            length: altM,
-            topRadius: 0,
-            bottomRadius: scanRadiusM,
-            material: Color.fromCssColorString('#b388ff').withAlpha(0.04),
-            outline: true,
-            outlineColor: Color.fromCssColorString('#b388ff').withAlpha(0.15),
-            outlineWidth: 1,
-          }),
-        });
-        footprintEntities.current.push(cone);
+        if (sat.altitude <= LEO_CEILING) {
+          const cone = viewer.entities.add({
+            position: Cartesian3.fromDegrees(sat.longitude, sat.latitude, altM / 2),
+            cylinder: new (window as any).Cesium.CylinderGraphics({
+              length: altM,
+              topRadius: 0,
+              bottomRadius: radiusM,
+              material: Color.fromCssColorString(color).withAlpha(0.06),
+              outline: true,
+              outlineColor: Color.fromCssColorString(color).withAlpha(0.2),
+              outlineWidth: 1,
+            }),
+          });
+          footprintEntities.current.push(cone);
+        }
       } catch {}
     }
   }, [satellites, selected, showFootprint, viewer]);

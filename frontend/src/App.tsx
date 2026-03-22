@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Viewer as CesiumViewer, Cartesian3, Math as CesiumMath, Rectangle } from 'cesium';
 import Globe, { MapStyle } from './components/Globe';
 import FlightLayer from './components/FlightLayer';
@@ -13,21 +13,42 @@ import { useShips, Ship } from './hooks/useShips';
 import ShipLayer from './components/ShipLayer';
 import { Aircraft, AircraftCategory } from './types';
 
+export type SatelliteCategory = 'earthObs' | 'comms' | 'nav' | 'science' | 'stations' | 'military';
+
+const SAT_CATEGORY_MAP: Record<string, SatelliteCategory> = {
+  'Weather': 'earthObs', 'NOAA': 'earthObs', 'GOES': 'earthObs', 'Planet Labs': 'earthObs',
+  'Starlink': 'comms', 'Iridium': 'comms', 'Globalstar': 'comms', 'OneWeb': 'comms',
+  'GPS': 'nav', 'Galileo': 'nav',
+  'Science': 'science',
+  'Space Stations': 'stations',
+  'Military': 'military',
+};
+
+const PREFS_KEY = 'skywatch-prefs';
+function loadPrefs(): Record<string, any> {
+  try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; }
+}
+
 export default function App() {
-  const [filters, setFilters] = useState<Record<AircraftCategory, boolean>>({
-    airline: true, private: true, military: true, ground: true,
-  });
+  const [prefs] = useState(loadPrefs);
+  const [filters, setFilters] = useState<Record<AircraftCategory, boolean>>(
+    prefs.filters ?? { airline: true, private: true, military: true, ground: true },
+  );
   const [selected, setSelected] = useState<Aircraft | null>(null);
   const [selectedSat, setSelectedSat] = useState<Satellite | null>(null);
   const [selectedQuake, setSelectedQuake] = useState<Earthquake | null>(null);
   const [selectedShip, setSelectedShip] = useState<Ship | null>(null);
-  const [mapStyle, setMapStyle] = useState<MapStyle>('dark');
-  const [showAircraft, setShowAircraft] = useState(true);
-  const [showTrails, setShowTrails] = useState(true);
-  const [showSatellites, setShowSatellites] = useState(true);
-  const [showEarthquakes, setShowEarthquakes] = useState(true);
-  const [showShips, setShowShips] = useState(true);
-  const [showSatFootprint, setShowSatFootprint] = useState(true);
+  const [mapStyle, setMapStyle] = useState<MapStyle>(prefs.mapStyle ?? 'dark');
+  const [showAircraft, setShowAircraft] = useState(prefs.showAircraft ?? true);
+  const [showTrails, setShowTrails] = useState(prefs.showTrails ?? true);
+  const [showSatellites, setShowSatellites] = useState(prefs.showSatellites ?? true);
+  const [showEarthquakes, setShowEarthquakes] = useState(prefs.showEarthquakes ?? true);
+  const [showShips, setShowShips] = useState(prefs.showShips ?? true);
+  const [showSatFootprint, setShowSatFootprint] = useState(prefs.showSatFootprint ?? true);
+  const [satFilters, setSatFilters] = useState<Record<SatelliteCategory, boolean>>(
+    prefs.satFilters ?? { earthObs: true, comms: true, nav: true, science: true, stations: true, military: true },
+  );
+  const [nearbySats, setNearbySats] = useState<Satellite[]>([]);
   const viewerRef = useRef<CesiumViewer | null>(null);
 
   const { flights, total, lastUpdate, error } = useFlights(true);
@@ -35,8 +56,35 @@ export default function App() {
   const earthquakes = useEarthquakes(showEarthquakes);
   const ships = useShips(showShips);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({
+        filters, satFilters, mapStyle,
+        showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showSatFootprint,
+      }));
+    } catch {}
+  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showSatFootprint]);
+
+  const visibleSatellites = useMemo(
+    () => satellites.filter(s => {
+      const cat = SAT_CATEGORY_MAP[s.group];
+      return cat ? satFilters[cat] : true;
+    }),
+    [satellites, satFilters],
+  );
+
+  const satCategoryCounts = useMemo(() => {
+    const c: Record<SatelliteCategory, number> = { earthObs: 0, comms: 0, nav: 0, science: 0, stations: 0, military: 0 };
+    for (const s of satellites) { const cat = SAT_CATEGORY_MAP[s.group]; if (cat) c[cat]++; }
+    return c;
+  }, [satellites]);
+
   const handleFilterChange = useCallback((cat: AircraftCategory, val: boolean) => {
     setFilters(prev => ({ ...prev, [cat]: val }));
+  }, []);
+
+  const handleSatFilterChange = useCallback((cat: SatelliteCategory, val: boolean) => {
+    setSatFilters(prev => ({ ...prev, [cat]: val }));
   }, []);
 
   const handleSelect = useCallback((ac: Aircraft | null) => {
@@ -57,6 +105,13 @@ export default function App() {
     setSelected(null);
     setSelectedQuake(null);
     setSelectedShip(null);
+    if (sat && viewerRef.current) {
+      const camAlt = Math.max(sat.altitude * 3000, 3_000_000);
+      viewerRef.current.camera.flyTo({
+        destination: Cartesian3.fromDegrees(sat.longitude, sat.latitude, camAlt),
+        duration: 1.5,
+      });
+    }
   }, []);
 
   const handleSelectQuake = useCallback((eq: Earthquake | null) => {
@@ -117,7 +172,7 @@ export default function App() {
           showTrails={showTrails}
         />}
         <AltitudeIndicator />
-        {showSatellites && <SatelliteLayer satellites={satellites} selected={selectedSat} onSelect={handleSelectSat} showFootprint={showSatFootprint} />}
+        {showSatellites && <SatelliteLayer satellites={visibleSatellites} selected={selectedSat} onSelect={handleSelectSat} showFootprint={showSatFootprint} onNearbySatellites={setNearbySats} />}
         {showEarthquakes && <EarthquakeLayer earthquakes={earthquakes} onSelect={handleSelectQuake} />}
         {showShips && <ShipLayer ships={ships} selected={selectedShip} onSelect={handleSelectShip} />}
       </Globe>
@@ -143,7 +198,7 @@ export default function App() {
         onSatellitesChange={setShowSatellites}
         showEarthquakes={showEarthquakes}
         onEarthquakesChange={setShowEarthquakes}
-        satelliteCount={satellites.length}
+        satelliteCount={visibleSatellites.length}
         earthquakeCount={earthquakes.length}
         selectedShip={selectedShip}
         showShips={showShips}
@@ -151,8 +206,31 @@ export default function App() {
         shipCount={ships.length}
         showSatFootprint={showSatFootprint}
         onSatFootprintChange={setShowSatFootprint}
+        satFilters={satFilters}
+        onSatFilterChange={handleSatFilterChange}
+        satCategoryCounts={satCategoryCounts}
+        nearbySats={nearbySats}
+        onSelectSat={handleSelectSat}
         onFlyToRegion={handleFlyToRegion}
       />
+      <div style={{
+        position: 'absolute', bottom: 8, left: 260, display: 'flex', gap: 14,
+        padding: '3px 12px', background: 'rgba(10,14,20,0.6)', borderRadius: 10,
+        fontSize: 10, color: '#6b7685', fontFamily: '-apple-system, sans-serif',
+        pointerEvents: 'none', zIndex: 5,
+      }}>
+        {[
+          ['#f0c040', 'Aircraft'],
+          ['#b388ff', 'Satellites'],
+          ['#ff9800', 'Earthquakes'],
+          ['#8bc34a', 'Ships'],
+        ].map(([color, label]) => (
+          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+            {label}
+          </span>
+        ))}
+      </div>
     </>
   );
 }

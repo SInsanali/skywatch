@@ -51,6 +51,8 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
       globe.baseColor = Color.fromCssColorString('#0a1628');
       globe.showGroundAtmosphere = true;
       globe.enableLighting = true;
+      // Lighten the night side so country labels stay readable
+      for (let i = 0; i < globe.imageryLayers.length; i++) { globe.imageryLayers.get(i).nightAlpha = 0.55; }
 
       if (cesiumElement.scene.skyAtmosphere) {
         cesiumElement.scene.skyAtmosphere.show = true;
@@ -139,5 +141,7 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         layers.addImageryProvider(darkLabelTiles);
       }
     }
+    // Keep night side lighter so labels stay readable
+    for (let i = 0; i < layers.length; i++) { layers.get(i).nightAlpha = 0.55; }
   }
 }
