@@ -5,11 +5,13 @@ import FlightLayer from './components/FlightLayer';
 import AltitudeIndicator from './components/AltitudeIndicator';
 import SatelliteLayer from './components/SatelliteLayer';
 import EarthquakeLayer from './components/EarthquakeLayer';
+import JammingLayer from './components/JammingLayer';
 import Sidebar from './components/Sidebar';
 import { useFlights } from './hooks/useFlights';
 import { useSatellites, Satellite } from './hooks/useSatellites';
 import { useEarthquakes, Earthquake } from './hooks/useEarthquakes';
 import { useShips, Ship } from './hooks/useShips';
+import { useJamming } from './hooks/useJamming';
 import ShipLayer from './components/ShipLayer';
 import { Aircraft, AircraftCategory } from './types';
 
@@ -44,6 +46,7 @@ export default function App() {
   const [showSatellites, setShowSatellites] = useState(prefs.showSatellites ?? true);
   const [showEarthquakes, setShowEarthquakes] = useState(prefs.showEarthquakes ?? true);
   const [showShips, setShowShips] = useState(prefs.showShips ?? true);
+  const [showJamming, setShowJamming] = useState(prefs.showJamming ?? true);
   const [showSatFootprint, setShowSatFootprint] = useState(prefs.showSatFootprint ?? true);
   const [satFilters, setSatFilters] = useState<Record<SatelliteCategory, boolean>>(
     prefs.satFilters ?? { earthObs: true, comms: true, nav: true, science: true, stations: true, military: true },
@@ -55,15 +58,16 @@ export default function App() {
   const satellites = useSatellites(showSatellites);
   const earthquakes = useEarthquakes(showEarthquakes);
   const ships = useShips(showShips);
+  const jammingZones = useJamming(showJamming);
 
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         filters, satFilters, mapStyle,
-        showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showSatFootprint,
+        showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint,
       }));
     } catch {}
-  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showSatFootprint]);
+  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint]);
 
   const visibleSatellites = useMemo(
     () => satellites.filter(s => {
@@ -175,6 +179,7 @@ export default function App() {
         {showSatellites && <SatelliteLayer satellites={visibleSatellites} selected={selectedSat} onSelect={handleSelectSat} showFootprint={showSatFootprint} onNearbySatellites={setNearbySats} />}
         {showEarthquakes && <EarthquakeLayer earthquakes={earthquakes} onSelect={handleSelectQuake} />}
         {showShips && <ShipLayer ships={ships} selected={selectedShip} onSelect={handleSelectShip} />}
+        {showJamming && <JammingLayer zones={jammingZones} />}
       </Globe>
       <Sidebar
         flights={flights}
@@ -204,6 +209,9 @@ export default function App() {
         showShips={showShips}
         onShipsChange={setShowShips}
         shipCount={ships.length}
+        showJamming={showJamming}
+        onJammingChange={setShowJamming}
+        jammingCount={jammingZones.length}
         showSatFootprint={showSatFootprint}
         onSatFootprintChange={setShowSatFootprint}
         satFilters={satFilters}
@@ -224,6 +232,7 @@ export default function App() {
           ['#b388ff', 'Satellites'],
           ['#ff9800', 'Earthquakes'],
           ['#8bc34a', 'Ships'],
+          ['#ef5350', 'GPS Jamming'],
         ].map(([color, label]) => (
           <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />

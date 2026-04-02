@@ -54,6 +54,9 @@ interface SidebarProps {
   showShips: boolean;
   onShipsChange: (val: boolean) => void;
   shipCount: number;
+  showJamming: boolean;
+  onJammingChange: (val: boolean) => void;
+  jammingCount: number;
   showSatFootprint: boolean;
   onSatFootprintChange: (val: boolean) => void;
   satFilters: Record<SatelliteCategory, boolean>;
@@ -188,7 +191,8 @@ export default function Sidebar({
   showSatellites, onSatellitesChange, showEarthquakes, onEarthquakesChange,
   satelliteCount, earthquakeCount,
   selectedSat, selectedQuake, selectedShip,
-  showShips, onShipsChange, shipCount, showSatFootprint, onSatFootprintChange,
+  showShips, onShipsChange, shipCount, showJamming, onJammingChange, jammingCount,
+  showSatFootprint, onSatFootprintChange,
   satFilters, onSatFilterChange, satCategoryCounts,
   nearbySats, onSelectSat, onFlyToRegion,
 }: SidebarProps) {
@@ -480,6 +484,14 @@ export default function Sidebar({
           <span style={{ ...styles.dot, background: '#8bc34a' }} />
           <span style={styles.filterLabel}>Ships</span>
           <span style={styles.filterCount}>{shipCount}</span>
+        </div>
+
+        {/* GPS Jamming */}
+        <div style={styles.filterRow}>
+          <input type="checkbox" checked={showJamming} onChange={e => onJammingChange(e.target.checked)} style={styles.checkbox} />
+          <span style={{ ...styles.dot, background: '#ef5350' }} />
+          <span style={styles.filterLabel}>GPS Jamming</span>
+          <span style={styles.filterCount}>{jammingCount}</span>
         </div>
       </div>
 

@@ -106,3 +106,12 @@ export const categoryColors: Record<AircraftCategory, string> = {
   military: '#f85149',
   ground: '#636e7b',
 };
+
+export interface JammingZone {
+  lat: number;
+  lon: number;
+  total: number;
+  degraded: number;
+  pct: number;
+  level: 'low' | 'medium' | 'high';
+}
