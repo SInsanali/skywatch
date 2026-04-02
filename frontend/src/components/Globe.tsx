@@ -62,10 +62,12 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
       const credit = cesiumElement.cesiumWidget.creditContainer as HTMLElement;
       if (credit) credit.style.display = 'none';
 
-      // Render at full device pixel ratio (Retina sharpness)
-      if (window.devicePixelRatio > 1) {
-        cesiumElement.resolutionScale = window.devicePixelRatio;
-      }
+      // Cap resolution scale — full devicePixelRatio on Retina renders 4x pixels
+      cesiumElement.resolutionScale = Math.min(window.devicePixelRatio, 1.5);
+
+      // Only re-render when something changes (camera move, entity update)
+      cesiumElement.scene.requestRenderMode = true;
+      cesiumElement.scene.maximumRenderTimeChange = 0.5;
 
       cesiumElement.scene.screenSpaceCameraController.zoomFactor = 3;
       cesiumElement.scene.screenSpaceCameraController.minimumZoomDistance = 200;

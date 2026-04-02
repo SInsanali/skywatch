@@ -56,7 +56,7 @@ CELESTRAK_GROUPS = {
 # Limit Starlink to avoid overwhelming the globe
 STARLINK_MAX = 200
 TLE_REFRESH_HOURS = 6
-SAT_PROPAGATE_INTERVAL = 5  # seconds
+SAT_PROPAGATE_INTERVAL = 15  # seconds
 
 USGS_QUAKES_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_week.geojson"
 QUAKES_REFRESH_SECONDS = 300  # 5 minutes

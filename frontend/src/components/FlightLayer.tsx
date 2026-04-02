@@ -15,11 +15,24 @@ import {
   Color,
   LabelCollection,
   LabelStyle,
+  Scene,
 } from 'cesium';
 import { Aircraft, AircraftCategory, classifyAircraft, categoryColors } from '../types';
 
 const MAX_TRAIL_POINTS = 30;
 const TRAIL_STALE_MS = 5 * 60 * 1000; // 5 min
+const DR_INTERVAL_MS = 1000; // dead reckoning bulk update interval
+const DR_MAX_AGE_SEC = 120; // stop extrapolating after 2 min
+const DR_MIN_SPEED_MPS = 5; // ignore very slow aircraft
+
+interface FlightState {
+  lat: number;
+  lon: number;
+  alt: number;
+  heading: number | null;
+  speed: number | null;
+  updatedAt: number;
+}
 
 // Airplane SVG icon
 function makeAirplaneSvg(color: string, size: number = 36): string {
@@ -80,9 +93,11 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
   const glowRef = useRef<BillboardCollection | null>(null);
   const trailsRef = useRef<PolylineCollection | null>(null);
   const labelsRef = useRef<LabelCollection | null>(null);
-  const billboardMapRef = useRef<Map<string, any>>(new Map());
+  const billboardMapRef = useRef<Map<string, { bb: any; label: any; glow: any }>>(new Map());
   const trailHistoryRef = useRef<Map<string, TrailPoint[]>>(new Map());
   const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const flightStateRef = useRef<Map<string, FlightState>>(new Map());
+  const lastDrUpdateRef = useRef<number>(0);
 
   // Initialize collections
   useEffect(() => {
@@ -150,7 +165,7 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
     };
   }, [viewer]);
 
-  // Update trail history, billboards, and trail polylines
+  // Update trail history, billboards, trail polylines, and flight state cache
   useEffect(() => {
     const bbCol = billboardsRef.current;
     const glowCol = glowRef.current;
@@ -166,6 +181,7 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
 
     const now = Date.now();
     const history = trailHistoryRef.current;
+    const stateCache = flightStateRef.current;
     const activeIds = new Set<string>();
 
     for (const ac of flights) {
@@ -182,56 +198,48 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
 
       const lastPoint = trail[trail.length - 1];
       const alt = ac.baro_altitude ?? 0;
-      // Only add if position changed meaningfully
       if (!lastPoint || Math.abs(lastPoint.lat - ac.latitude) > 0.001 || Math.abs(lastPoint.lon - ac.longitude) > 0.001) {
         trail.push({ lat: ac.latitude, lon: ac.longitude, alt: alt > 0 ? alt : 0, time: now });
         if (trail.length > MAX_TRAIL_POINTS) trail.shift();
       }
 
-      // Prune old points
       while (trail.length > 0 && now - trail[0].time > TRAIL_STALE_MS) trail.shift();
 
-      // Dead reckoning
-      let lat = ac.latitude;
-      let lon = ac.longitude;
-
-      if (ac._updateTime && ac.velocity && ac.true_track != null) {
-        const elapsed = (now - ac._updateTime) / 1000;
-        if (elapsed > 0 && elapsed < 30) {
-          const speed = ac.velocity;
-          const hdg = ac.true_track * Math.PI / 180;
-          const dist = speed * elapsed;
-          const dlat = (dist * Math.cos(hdg)) / 111320;
-          const dlon = (dist * Math.sin(hdg)) / (111320 * Math.cos(lat * Math.PI / 180));
-          lat += dlat;
-          lon += dlon;
-        }
-      }
-
+      // Snap to real position and update flight state cache
+      const lat = ac.latitude;
+      const lon = ac.longitude;
       const altMeters = alt > 0 ? alt : 0;
+
+      stateCache.set(ac.icao24, {
+        lat, lon, alt: altMeters,
+        heading: ac.true_track,
+        speed: ac.velocity,
+        updatedAt: now,
+      });
+
       const position = Cartesian3.fromDegrees(lon, lat, altMeters);
       const rotation = ac.true_track != null ? CesiumMath.toRadians(-(ac.true_track)) : 0;
       const isSelected = selected?.icao24 === ac.icao24;
       const color = categoryColors[cat];
 
-      // Draw trail polyline (only for selected aircraft)
+      // Trail polyline (selected aircraft only)
       if (showTrails && isSelected && trail.length >= 2) {
         const positions = trail.map(p => Cartesian3.fromDegrees(p.lon, p.lat, p.alt));
-        // Add current (dead-reckoned) position as trail tip
         positions.push(position);
 
         trailCol.add({
           positions,
-          width: isSelected ? 2.5 : 1.5,
+          width: 2.5,
           material: Material.fromType('Color', {
-            color: Color.fromCssColorString(color).withAlpha(isSelected ? 0.7 : 0.35),
+            color: Color.fromCssColorString(color).withAlpha(0.7),
           }),
         });
       }
 
-      // Selection glow ring
+      // Selection glow
+      let glowBb = null;
       if (isSelected) {
-        glowCol.add({
+        glowBb = glowCol.add({
           position,
           image: getGlow(cat),
           scale: 1.0,
@@ -254,12 +262,12 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
         translucencyByDistance: new NearFarScalar(5e3, 1.0, 3e7, 0.5),
       });
       (bb as any)._skywatch_aircraft = ac;
-      billboardMapRef.current.set(ac.icao24, bb);
 
-      // Persistent callsign label (visible when zoomed in past ~2000km)
+      // Callsign label
+      let lbl = null;
       const labelText = ac.flight || ac.callsign || ac.reg || '';
       if (labelText) {
-        lblCol.add({
+        lbl = lblCol.add({
           position,
           text: labelText,
           font: '13px -apple-system, sans-serif',
@@ -274,13 +282,66 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
           translucencyByDistance: new NearFarScalar(1e5, 1.0, 5e6, 0.0),
         });
       }
+
+      billboardMapRef.current.set(ac.icao24, { bb, label: lbl, glow: glowBb });
     }
 
-    // Prune trail history for aircraft no longer tracked
+    // Prune stale entries
     for (const id of history.keys()) {
       if (!activeIds.has(id)) history.delete(id);
     }
+    for (const id of stateCache.keys()) {
+      if (!activeIds.has(id)) stateCache.delete(id);
+    }
+
+    // Reset DR timer so interpolation starts fresh from new data
+    lastDrUpdateRef.current = now;
   }, [flights, filters, selected, showTrails, viewer]);
+
+  // Dead reckoning via scene.preUpdate — bulk-updates positions every DR_INTERVAL_MS
+  useEffect(() => {
+    if (!viewer) return;
+
+    const onPreUpdate = (_scene: Scene, _time: any) => {
+      const now = Date.now();
+      if (now - lastDrUpdateRef.current < DR_INTERVAL_MS) return;
+      lastDrUpdateRef.current = now;
+
+      const stateCache = flightStateRef.current;
+      const entries = billboardMapRef.current;
+
+      for (const [icao, refs] of entries) {
+        const state = stateCache.get(icao);
+        if (!state) continue;
+
+        const { heading, speed } = state;
+        if (heading == null || speed == null || speed < DR_MIN_SPEED_MPS) continue;
+
+        const dtSec = (now - state.updatedAt) / 1000;
+        if (dtSec <= 0 || dtSec > DR_MAX_AGE_SEC) continue;
+
+        const hdgRad = heading * Math.PI / 180;
+        const dist = speed * dtSec;
+        const dlat = (dist * Math.cos(hdgRad)) / 111320;
+        const dlon = (dist * Math.sin(hdgRad)) / (111320 * Math.cos(state.lat * Math.PI / 180));
+
+        const newLat = state.lat + dlat;
+        const newLon = state.lon + dlon;
+        const pos = Cartesian3.fromDegrees(newLon, newLat, state.alt);
+
+        refs.bb.position = pos;
+        if (refs.label) refs.label.position = pos;
+        if (refs.glow) refs.glow.position = pos;
+      }
+
+      viewer.scene.requestRender();
+    };
+
+    viewer.scene.preUpdate.addEventListener(onPreUpdate);
+    return () => {
+      viewer.scene.preUpdate.removeEventListener(onPreUpdate);
+    };
+  }, [viewer]);
 
   return null;
 }
