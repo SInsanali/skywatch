@@ -26,10 +26,12 @@ export function useJamming(enabled: boolean) {
     const fetchData = async () => {
       try {
         const res = await fetch('/api/jamming');
-        if (!res.ok) return;
+        if (!res.ok) { console.error(`[Skywatch] Jamming fetch failed: HTTP ${res.status}`); return; }
         const data: JammingResponse = await res.json();
         if (!cancelled) setZones(data.zones || []);
-      } catch {}
+      } catch (e) {
+        console.error('[Skywatch] Jamming data fetch failed:', e);
+      }
     };
 
     fetchData();

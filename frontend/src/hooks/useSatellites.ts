@@ -21,10 +21,12 @@ export function useSatellites(enabled: boolean) {
     const fetchData = async () => {
       try {
         const res = await fetch('/api/satellites');
-        if (!res.ok) return;
+        if (!res.ok) { console.error(`[Skywatch] Satellite fetch failed: HTTP ${res.status}`); return; }
         const data: Satellite[] = await res.json();
         if (!cancelled) setSatellites(data);
-      } catch {}
+      } catch (e) {
+        console.error('[Skywatch] Satellite data fetch failed:', e);
+      }
     };
 
     fetchData();

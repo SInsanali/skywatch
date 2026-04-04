@@ -7,6 +7,7 @@ import {
   Math as CesiumMath,
   UrlTemplateImageryProvider,
   IonImageryProvider,
+  TileProviderError,
 } from 'cesium';
 
 export type MapStyle = 'dark' | 'satellite';
@@ -82,6 +83,18 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         },
       });
 
+      // Log rendering / WebGL errors instead of swallowing them
+      cesiumElement.scene.renderError.addEventListener((_scene: any, error: any) => {
+        console.error('[Skywatch] Scene render error:', error);
+      });
+
+      // Log imagery tile load failures
+      cesiumElement.scene.globe.imageryLayers.layerAdded.addEventListener((layer: any) => {
+        layer.imageryProvider.errorEvent?.addEventListener((err: TileProviderError) => {
+          console.error('[Skywatch] Tile load failed:', err.message, err);
+        });
+      });
+
       applyMapStyle(cesiumElement, mapStyle);
       if (onViewerReady) onViewerReady(cesiumElement);
     } catch (e) {
@@ -127,13 +140,16 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         const bingRoad = await IonImageryProvider.fromAssetId(4);
         const roadLayer = layers.addImageryProvider(bingRoad);
         roadLayer.alpha = 0.2;
-      } catch {}
+      } catch (e) {
+        console.error('[Skywatch] Failed to load Bing road overlay:', e);
+      }
     } else {
       // Bing Maps Aerial with Labels (Ion asset 3) — clean, Google Earth quality
       try {
         const bingLabeled = await IonImageryProvider.fromAssetId(3);
         layers.addImageryProvider(bingLabeled);
-      } catch {
+      } catch (e) {
+        console.error('[Skywatch] Failed to load Bing satellite imagery, using fallback:', e);
         // Fallback: ESRI satellite + CARTO labels
         layers.addImageryProvider(new UrlTemplateImageryProvider({
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',

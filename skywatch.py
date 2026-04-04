@@ -3,12 +3,14 @@ import logging
 import signal
 import sys
 import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 import yaml
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from feeds.aircraft import (
@@ -30,6 +32,45 @@ logging.basicConfig(
 log = logging.getLogger("skywatch")
 
 VIEWER_TIMEOUT = 60
+
+
+class RateLimiter:
+    """Simple in-memory per-IP rate limiter using sliding window."""
+
+    def __init__(self, max_requests: int, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self.requests: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup = time.time()
+
+    def is_allowed(self, ip: str) -> bool:
+        now = time.time()
+        cutoff = now - self.window
+
+        # periodic cleanup every 5 minutes
+        if now - self._last_cleanup > 300:
+            self._cleanup(cutoff)
+
+        timestamps = self.requests[ip]
+        # trim old entries for this IP
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.pop(0)
+
+        if len(timestamps) >= self.max_requests:
+            return False
+        timestamps.append(now)
+        return True
+
+    def _cleanup(self, cutoff: float):
+        self._last_cleanup = time.time()
+        stale = [ip for ip, ts in self.requests.items()
+                 if not ts or ts[-1] < cutoff]
+        for ip in stale:
+            del self.requests[ip]
+
+
+data_limiter = RateLimiter(max_requests=60, window_seconds=60)
+light_limiter = RateLimiter(max_requests=120, window_seconds=60)
 
 
 class Config:
@@ -142,6 +183,22 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+
+LIGHT_ENDPOINTS = {"/api/health", "/api/heartbeat"}
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/"):
+        ip = request.client.host if request.client else "unknown"
+        limiter = light_limiter if path in LIGHT_ENDPOINTS else data_limiter
+        if not limiter.is_allowed(ip):
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests"},
+            )
+    return await call_next(request)
 
 
 @app.get("/api/aircraft")

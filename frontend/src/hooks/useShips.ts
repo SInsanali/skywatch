@@ -31,10 +31,12 @@ export function useShips(enabled: boolean) {
     const fetchData = async () => {
       try {
         const res = await fetch('/api/ships');
-        if (!res.ok) return;
+        if (!res.ok) { console.error(`[Skywatch] Ship fetch failed: HTTP ${res.status}`); return; }
         const data = await res.json();
         if (!cancelled) setShips(data.ships || []);
-      } catch {}
+      } catch (e) {
+        console.error('[Skywatch] Ship data fetch failed:', e);
+      }
     };
 
     fetchData();

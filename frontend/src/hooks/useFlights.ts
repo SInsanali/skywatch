@@ -62,6 +62,7 @@ export function useFlights(enabled: boolean) {
         setLastUpdate(data.timestamp);
         setError(null);
       } catch (e: any) {
+        console.error('[Skywatch] Flight data fetch failed:', e);
         if (!cancelled) setError(e.message || 'Connection error');
       }
     };

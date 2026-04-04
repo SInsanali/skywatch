@@ -22,7 +22,7 @@ export function useEarthquakes(enabled: boolean) {
     const fetchData = async () => {
       try {
         const res = await fetch('/api/earthquakes');
-        if (!res.ok) return;
+        if (!res.ok) { console.error(`[Skywatch] Earthquake fetch failed: HTTP ${res.status}`); return; }
         const data = await res.json();
         const features = data?.features || [];
         const parsed: Earthquake[] = features.map((f: any) => ({
@@ -35,7 +35,9 @@ export function useEarthquakes(enabled: boolean) {
           depth: f.geometry.coordinates[2],
         }));
         if (!cancelled) setEarthquakes(parsed);
-      } catch {}
+      } catch (e) {
+        console.error('[Skywatch] Earthquake data fetch failed:', e);
+      }
     };
 
     fetchData();
