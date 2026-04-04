@@ -19,11 +19,18 @@ import {
 } from 'cesium';
 import { Aircraft, AircraftCategory, classifyAircraft, categoryColors } from '../types';
 
-const MAX_TRAIL_POINTS = 30;
-const TRAIL_STALE_MS = 5 * 60 * 1000; // 5 min
+const MAX_TRAIL_POINTS = 60;
+const TRAIL_STALE_MS = 15 * 60 * 1000; // 15 min
 const DR_INTERVAL_MS = 1000; // dead reckoning bulk update interval
 const DR_MAX_AGE_SEC = 120; // stop extrapolating after 2 min
 const DR_MIN_SPEED_MPS = 5; // ignore very slow aircraft
+
+interface TrailPoint {
+  lat: number;
+  lon: number;
+  alt: number;
+  time: number;
+}
 
 interface FlightState {
   lat: number;
@@ -70,13 +77,6 @@ function getGlow(category: AircraftCategory): string {
     glowCache[category] = makeGlowSvg(categoryColors[category]);
   }
   return glowCache[category];
-}
-
-interface TrailPoint {
-  lat: number;
-  lon: number;
-  alt: number;
-  time: number;
 }
 
 interface FlightLayerProps {
@@ -180,8 +180,8 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
     billboardMapRef.current.clear();
 
     const now = Date.now();
-    const history = trailHistoryRef.current;
     const stateCache = flightStateRef.current;
+    const history = trailHistoryRef.current;
     const activeIds = new Set<string>();
 
     for (const ac of flights) {
@@ -189,26 +189,23 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
       if (!filters[cat]) continue;
       activeIds.add(ac.icao24);
 
-      // Update trail history
+      const alt = ac.baro_altitude ?? 0;
+      const lat = ac.latitude;
+      const lon = ac.longitude;
+      const altMeters = alt > 0 ? alt : 0;
+
+      // Accumulate trail history for ALL aircraft (so trail exists when you select one)
       let trail = history.get(ac.icao24);
       if (!trail) {
         trail = [];
         history.set(ac.icao24, trail);
       }
-
-      const lastPoint = trail[trail.length - 1];
-      const alt = ac.baro_altitude ?? 0;
-      if (!lastPoint || Math.abs(lastPoint.lat - ac.latitude) > 0.001 || Math.abs(lastPoint.lon - ac.longitude) > 0.001) {
-        trail.push({ lat: ac.latitude, lon: ac.longitude, alt: alt > 0 ? alt : 0, time: now });
+      const lastPt = trail[trail.length - 1];
+      if (!lastPt || Math.abs(lastPt.lat - lat) > 0.001 || Math.abs(lastPt.lon - lon) > 0.001) {
+        trail.push({ lat, lon, alt: altMeters, time: now });
         if (trail.length > MAX_TRAIL_POINTS) trail.shift();
       }
-
       while (trail.length > 0 && now - trail[0].time > TRAIL_STALE_MS) trail.shift();
-
-      // Snap to real position and update flight state cache
-      const lat = ac.latitude;
-      const lon = ac.longitude;
-      const altMeters = alt > 0 ? alt : 0;
 
       stateCache.set(ac.icao24, {
         lat, lon, alt: altMeters,
@@ -222,17 +219,16 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
       const isSelected = selected?.icao24 === ac.icao24;
       const color = categoryColors[cat];
 
-      // Trail polyline
-      if (showTrails && trail.length >= 2) {
+      // Trail polyline (selected aircraft only — history accumulated for all)
+      if (showTrails && isSelected && trail.length >= 2) {
         const positions = trail.map(p => Cartesian3.fromDegrees(p.lon, p.lat, p.alt));
         positions.push(position);
 
         trailCol.add({
           positions,
-          width: isSelected ? 3.0 : 1.5,
-          material: Material.fromType('PolylineFade', {
-            color: Color.fromCssColorString(color).withAlpha(isSelected ? 0.8 : 0.4),
-            fadeLength: 0.3,
+          width: 2.5,
+          material: Material.fromType('Color', {
+            color: Color.fromCssColorString(color).withAlpha(0.8),
           }),
         });
       }
@@ -288,11 +284,11 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
     }
 
     // Prune stale entries
-    for (const id of history.keys()) {
-      if (!activeIds.has(id)) history.delete(id);
-    }
     for (const id of stateCache.keys()) {
       if (!activeIds.has(id)) stateCache.delete(id);
+    }
+    for (const id of history.keys()) {
+      if (!activeIds.has(id)) history.delete(id);
     }
 
     // Reset DR timer so interpolation starts fresh from new data
