@@ -4,7 +4,7 @@ WORKDIR /build
 COPY frontend/ .
 RUN npm install && npm run build
 
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 LABEL maintainer="SInsanali"
 LABEL description="Self-hosted flight tracker"

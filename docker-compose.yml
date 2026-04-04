@@ -6,6 +6,8 @@ services:
       - "8078:8078"
     environment:
       - TZ=UTC
+    volumes:
+      - ./secrets.yaml:/app/secrets.yaml:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8078/api/health"]

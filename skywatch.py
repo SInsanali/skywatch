@@ -788,17 +788,30 @@ async def poll_aircraft():
             await asyncio.sleep(interval)
 
 
+async def resilient_task(name, coro_func):
+    """Run a background task, restarting on unexpected failures."""
+    while True:
+        try:
+            await coro_func()
+            break  # normal exit
+        except asyncio.CancelledError:
+            raise  # let cancellation propagate
+        except Exception as e:
+            log.error("Task '%s' crashed: %s — restarting in 30s", name, e)
+            await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app):
     await load_airports()
     await load_airlines()
-    db_task = asyncio.create_task(refresh_aircraft_db())
-    poll_task = asyncio.create_task(poll_aircraft())
-    tle_task = asyncio.create_task(refresh_tles())
-    sat_task = asyncio.create_task(propagate_satellites_loop())
-    quake_task = asyncio.create_task(refresh_earthquakes())
-    ship_task = asyncio.create_task(refresh_ships())
-    gpsjam_task = asyncio.create_task(refresh_gpsjam())
+    db_task = asyncio.create_task(resilient_task("refresh_aircraft_db", refresh_aircraft_db))
+    poll_task = asyncio.create_task(resilient_task("poll_aircraft", poll_aircraft))
+    tle_task = asyncio.create_task(resilient_task("refresh_tles", refresh_tles))
+    sat_task = asyncio.create_task(resilient_task("propagate_satellites_loop", propagate_satellites_loop))
+    quake_task = asyncio.create_task(resilient_task("refresh_earthquakes", refresh_earthquakes))
+    ship_task = asyncio.create_task(resilient_task("refresh_ships", refresh_ships))
+    gpsjam_task = asyncio.create_task(resilient_task("refresh_gpsjam", refresh_gpsjam))
     log.info("Skywatch started on port %d (source: airplanes.live)", config.port)
     yield
     for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task]:

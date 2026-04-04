@@ -222,16 +222,17 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
       const isSelected = selected?.icao24 === ac.icao24;
       const color = categoryColors[cat];
 
-      // Trail polyline (selected aircraft only)
-      if (showTrails && isSelected && trail.length >= 2) {
+      // Trail polyline
+      if (showTrails && trail.length >= 2) {
         const positions = trail.map(p => Cartesian3.fromDegrees(p.lon, p.lat, p.alt));
         positions.push(position);
 
         trailCol.add({
           positions,
-          width: 2.5,
-          material: Material.fromType('Color', {
-            color: Color.fromCssColorString(color).withAlpha(0.7),
+          width: isSelected ? 3.0 : 1.5,
+          material: Material.fromType('PolylineFade', {
+            color: Color.fromCssColorString(color).withAlpha(isSelected ? 0.8 : 0.4),
+            fadeLength: 0.3,
           }),
         });
       }
