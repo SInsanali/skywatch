@@ -7,15 +7,12 @@ import {
   Math as CesiumMath,
   UrlTemplateImageryProvider,
   IonImageryProvider,
-  PostProcessStage,
 } from 'cesium';
-import { ShaderMode, NVG_SHADER, FLIR_SHADER, SHADER_DEFAULTS } from '../shaders/postprocess';
 
 export type MapStyle = 'dark' | 'satellite';
 
 interface GlobeProps {
   mapStyle: MapStyle;
-  shaderMode?: ShaderMode;
   onViewerReady?: (viewer: CesiumViewer) => void;
   children?: React.ReactNode;
 }
@@ -40,10 +37,9 @@ const darkLabelTiles = new UrlTemplateImageryProvider({
   credit: 'CARTO / OSM',
 });
 
-export default function Globe({ mapStyle, shaderMode = 'none', onViewerReady, children }: GlobeProps) {
+export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps) {
   const initialized = useRef(false);
   const viewerRef = useRef<CesiumViewer | null>(null);
-  const activeStageRef = useRef<PostProcessStage | null>(null);
 
   const handleViewerReady = useCallback((cesiumElement: CesiumViewer) => {
     if (initialized.current) return;
@@ -98,37 +94,6 @@ export default function Globe({ mapStyle, shaderMode = 'none', onViewerReady, ch
       applyMapStyle(viewerRef.current, mapStyle);
     }
   }, [mapStyle]);
-
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-
-    // Remove previous stage
-    if (activeStageRef.current) {
-      viewer.scene.postProcessStages.remove(activeStageRef.current);
-      activeStageRef.current = null;
-    }
-
-    if (shaderMode === 'none') {
-      viewer.scene.requestRender();
-      return;
-    }
-
-    const shader = shaderMode === 'nvg' ? NVG_SHADER : FLIR_SHADER;
-    const uniforms = shaderMode === 'nvg' ? { ...SHADER_DEFAULTS.nvg } : { ...SHADER_DEFAULTS.flir };
-
-    const stage = new PostProcessStage({ fragmentShader: shader, uniforms });
-    viewer.scene.postProcessStages.add(stage);
-    activeStageRef.current = stage;
-    viewer.scene.requestRender();
-
-    return () => {
-      if (activeStageRef.current && !viewer.isDestroyed()) {
-        viewer.scene.postProcessStages.remove(activeStageRef.current);
-        activeStageRef.current = null;
-      }
-    };
-  }, [shaderMode]);
 
   return (
     <Viewer

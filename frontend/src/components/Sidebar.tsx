@@ -5,7 +5,6 @@ import { Satellite } from '../hooks/useSatellites';
 import { Earthquake } from '../hooks/useEarthquakes';
 import { Ship } from '../hooks/useShips';
 import type { SatelliteCategory } from '../App';
-import type { ShaderMode } from '../shaders/postprocess';
 
 type RegionKey = 'global' | 'na' | 'eu' | 'asia' | 'me' | 'af' | 'sa' | 'oc';
 
@@ -66,8 +65,6 @@ interface SidebarProps {
   nearbySats: Satellite[];
   onSelectSat: (sat: Satellite) => void;
   onFlyToRegion: (region: RegionKey, bounds?: RegionBounds) => void;
-  shaderMode: ShaderMode;
-  onShaderModeChange: (mode: ShaderMode) => void;
 }
 
 const catLabels: Record<AircraftCategory, string> = {
@@ -198,7 +195,6 @@ export default function Sidebar({
   showSatFootprint, onSatFootprintChange,
   satFilters, onSatFilterChange, satCategoryCounts,
   nearbySats, onSelectSat, onFlyToRegion,
-  shaderMode, onShaderModeChange,
 }: SidebarProps) {
   const [search, setSearch] = useState('');
   const [activeRegion, setActiveRegion] = useState<RegionKey>('global');
@@ -516,29 +512,6 @@ export default function Sidebar({
               }}
             >
               {s === 'dark' ? 'Dark' : 'Satellite'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Vision Mode */}
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>Vision Mode</div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {([
-            { key: 'none', label: 'Normal', activeStyle: styles.pillActive },
-            { key: 'nvg', label: 'NVG', activeStyle: { background: '#1b3a1b', color: '#4eff7a', borderColor: '#2a5c2a' } },
-            { key: 'flir', label: 'FLIR', activeStyle: { background: '#3a2a1b', color: '#ffb74d', borderColor: '#5c3f2a' } },
-          ] as const).map(m => (
-            <button
-              key={m.key}
-              onClick={() => onShaderModeChange(m.key)}
-              style={{
-                ...styles.pill,
-                ...(shaderMode === m.key ? m.activeStyle : {}),
-              }}
-            >
-              {m.label}
             </button>
           ))}
         </div>
