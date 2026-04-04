@@ -14,6 +14,7 @@ import { useShips, Ship } from './hooks/useShips';
 import { useJamming } from './hooks/useJamming';
 import ShipLayer from './components/ShipLayer';
 import { Aircraft, AircraftCategory } from './types';
+import type { ShaderMode } from './shaders/postprocess';
 
 export type SatelliteCategory = 'earthObs' | 'comms' | 'nav' | 'science' | 'stations' | 'military';
 
@@ -48,6 +49,7 @@ export default function App() {
   const [showShips, setShowShips] = useState(prefs.showShips ?? true);
   const [showJamming, setShowJamming] = useState(prefs.showJamming ?? true);
   const [showSatFootprint, setShowSatFootprint] = useState(prefs.showSatFootprint ?? true);
+  const [shaderMode, setShaderMode] = useState<ShaderMode>(prefs.shaderMode ?? 'none');
   const [satFilters, setSatFilters] = useState<Record<SatelliteCategory, boolean>>(
     prefs.satFilters ?? { earthObs: true, comms: true, nav: true, science: true, stations: true, military: true },
   );
@@ -63,11 +65,11 @@ export default function App() {
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
-        filters, satFilters, mapStyle,
+        filters, satFilters, mapStyle, shaderMode,
         showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint,
       }));
     } catch {}
-  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint]);
+  }, [filters, satFilters, mapStyle, shaderMode, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint]);
 
   const visibleSatellites = useMemo(
     () => satellites.filter(s => {
@@ -167,7 +169,7 @@ export default function App() {
 
   return (
     <>
-      <Globe mapStyle={mapStyle} onViewerReady={handleViewerReady}>
+      <Globe mapStyle={mapStyle} shaderMode={shaderMode} onViewerReady={handleViewerReady}>
         {showAircraft && <FlightLayer
           flights={flights}
           selected={selected}
@@ -220,6 +222,8 @@ export default function App() {
         nearbySats={nearbySats}
         onSelectSat={handleSelectSat}
         onFlyToRegion={handleFlyToRegion}
+        shaderMode={shaderMode}
+        onShaderModeChange={setShaderMode}
       />
       <div style={{
         position: 'absolute', bottom: 8, left: 260, display: 'flex', gap: 14,
