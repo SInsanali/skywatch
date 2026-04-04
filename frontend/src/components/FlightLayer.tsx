@@ -226,9 +226,9 @@ export default function FlightLayer({ flights, selected, onSelect, filters, show
 
         trailCol.add({
           positions,
-          width: 2.5,
+          width: 3.0,
           material: Material.fromType('Color', {
-            color: Color.fromCssColorString(color).withAlpha(0.8),
+            color: Color.fromCssColorString('#4285F4'),
           }),
         });
       }

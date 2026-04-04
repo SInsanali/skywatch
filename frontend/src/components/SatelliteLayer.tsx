@@ -308,30 +308,14 @@ export default function SatelliteLayer({ satellites, selected, onSelect, showFoo
           ellipse: new (window as any).Cesium.EllipseGraphics({
             semiMajorAxis: radiusM,
             semiMinorAxis: radiusM,
-            material: Color.fromCssColorString(color).withAlpha(0.15),
+            material: Color.fromCssColorString(color).withAlpha(0.25),
             outline: true,
-            outlineColor: Color.fromCssColorString(color).withAlpha(0.5),
+            outlineColor: Color.fromCssColorString(color).withAlpha(0.6),
             outlineWidth: 1,
             height: 0,
           }),
         });
         footprintEntities.current.push(footprint);
-
-        if (sat.altitude <= LEO_CEILING) {
-          const cone = viewer.entities.add({
-            position: Cartesian3.fromDegrees(sat.longitude, sat.latitude, altM / 2),
-            cylinder: new (window as any).Cesium.CylinderGraphics({
-              length: altM,
-              topRadius: 0,
-              bottomRadius: radiusM,
-              material: Color.fromCssColorString(color).withAlpha(0.06),
-              outline: true,
-              outlineColor: Color.fromCssColorString(color).withAlpha(0.2),
-              outlineWidth: 1,
-            }),
-          });
-          footprintEntities.current.push(cone);
-        }
       } catch {}
     }
   }, [satellites, selected, showFootprint, viewer]);
