@@ -211,3 +211,45 @@ Disabling reverses this: the next loop iteration sees `enabled=False`, the task 
 - `.gitignore` — add `runtime-config.yaml`
 - `docker-compose.yml` — mount `runtime-config.yaml` read-write
 - `config.yaml` — add `feeds:` block with default values for each feed (enabled, interval)
+
+## Follow-up Roadmap
+
+Each NASA feed below ships as its own PR after v1 lands. They are deferred, not abandoned. Listed in recommended build order.
+
+### FIRMS (Fire Information for Resource Management System)
+
+- **Endpoint**: `https://firms.modaps.eosdis.nasa.gov/api/area/csv/{MAP_KEY}/{source}/world/1`
+- **Auth**: Free MAP_KEY from `firms.modaps.eosdis.nasa.gov` (separate from api.nasa.gov)
+- **Cadence**: Near-real-time (~3 hr lag). Recommended polling: 600s (10 min)
+- **Geometry**: Lat/lon points with brightness, FRP, confidence, satellite source
+- **UI**: New `FireLayer.tsx` rendering colored points scaled by FRP
+- **Why deferred**: Same polling shape as EONET — almost a copy-paste once the v1 catalog exists. Adding it post-v1 is the cheapest follow-up.
+- **Estimated work**: ~1 hour
+
+### DONKI + NOAA SWPC OVATION (Space Weather)
+
+- **DONKI endpoint**: `https://api.nasa.gov/DONKI/{CME,FLR,GST}` — needs api.nasa.gov key
+- **OVATION endpoint**: `https://services.swpc.noaa.gov/json/ovation_aurora_latest.json` — no auth
+- **Cadence**: Hourly for DONKI events, every ~5 min for OVATION. Recommended polling: 1800s for DONKI, 300s for OVATION
+- **Geometry**: DONKI events are mostly solar-frame (HUD card material); OVATION returns the auroral oval as a heatmap polygon
+- **UI**: `AuroraLayer.tsx` for the OVATION oval; sidebar HUD card for "current Kp index" and "latest CME"
+- **Why deferred**: Two sources to wire up rather than one, and the visualization is hybrid (polygon + HUD), so it's not a copy-paste pattern. Pairs naturally with the existing GPS jamming layer (geomagnetic storms degrade GNSS).
+- **Estimated work**: ~half-day
+
+### GIBS (Global Imagery Browse Services)
+
+- **Endpoint**: `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/{Layer}/default/{Time}/{TileMatrixSet}/{z}/{y}/{x}.{ext}`
+- **Auth**: None
+- **Cadence**: Daily for most layers (yesterday's imagery available by ~14:00 UTC)
+- **Geometry**: WMTS imagery tiles consumed natively by Cesium's `WebMapTileServiceImageryProvider`
+- **UI**: Toggleable imagery overlay with opacity slider; layer picker (true color, cloud cover, fires/thermal, snow cover)
+- **Required architectural change**: The `Feed` dataclass currently models polling feeds (`enabled`, `interval_seconds`, `api_key`). GIBS needs a different shape (`layer_name`, `date`, `opacity`). The catalog must grow a `kind: "polling" | "imagery"` discriminant, and `FeedCard` must render two card variants.
+- **Why deferred**: Forces an abstraction widening, not a copy-paste of EONET. Worth doing well.
+- **Estimated work**: ~half to full day
+
+### NeoWs (Near-Earth Objects)
+
+- **Endpoint**: `https://api.nasa.gov/neo/rest/v1/feed`
+- **Auth**: api.nasa.gov key (1000/hr)
+- **Geometry**: Not strongly geospatial (heliocentric/geocentric distance only). Best as a sidebar HUD ("today's closest approach") rather than a globe layer.
+- **Status**: Lower priority. Skipped from the v1+follow-up roadmap unless requested. Including it would be a small HUD widget, no new backend feed.
