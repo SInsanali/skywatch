@@ -8,11 +8,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-import yaml
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from config_store import ConfigStore
 from feeds.aircraft import (
     load_airlines,
     load_airports,
@@ -73,40 +73,7 @@ data_limiter = RateLimiter(max_requests=60, window_seconds=60)
 light_limiter = RateLimiter(max_requests=120, window_seconds=60)
 
 
-class Config:
-    def __init__(self):
-        path = Path("/app/config.yaml")
-        if not path.exists():
-            path = Path("config.yaml")
-        with open(path) as f:
-            raw = yaml.safe_load(f)
-
-        # Overlay secrets.yaml if it exists (gitignored, holds API keys)
-        secrets_path = path.parent / "secrets.yaml"
-        if secrets_path.exists():
-            with open(secrets_path) as f:
-                secrets = yaml.safe_load(f) or {}
-            for key, val in secrets.items():
-                if isinstance(val, dict) and isinstance(raw.get(key), dict):
-                    raw[key].update(val)
-                else:
-                    raw[key] = val
-
-        polling = raw.get("polling", {})
-        self.poll_interval = polling.get("interval", 15)
-        self.timeout = polling.get("timeout", 20)
-
-        ais = raw.get("aisstream", {})
-        self.ais_api_key = ais.get("api_key", "")
-        self.ais_burst_duration = ais.get("burst_duration", 20)
-        self.ais_cache_ttl = ais.get("cache_ttl", 60)
-
-        server = raw.get("server", {})
-        self.host = server.get("host", "0.0.0.0")
-        self.port = server.get("port", 8078)
-
-
-config = Config()
+store = ConfigStore.load()
 
 aircraft_state = {
     "timestamp": 0,
@@ -153,24 +120,24 @@ async def lifespan(app):
     await load_airports(airports)
     await load_airlines(airline_db)
     db_task = asyncio.create_task(resilient_task(
-        "refresh_aircraft_db", lambda: refresh_aircraft_db(aircraft_db)))
+        "refresh_aircraft_db", lambda: refresh_aircraft_db(store, aircraft_db)))
     poll_task = asyncio.create_task(resilient_task(
         "poll_aircraft",
-        lambda: poll_aircraft(config, aircraft_state, aircraft_db, airline_db,
+        lambda: poll_aircraft(store, aircraft_state, aircraft_db, airline_db,
                               jamming_state, has_active_viewer)))
     tle_task = asyncio.create_task(resilient_task(
-        "refresh_tles", lambda: refresh_tles(satellite_records)))
+        "refresh_tles", lambda: refresh_tles(store, satellite_records)))
     sat_task = asyncio.create_task(resilient_task(
         "propagate_satellites_loop",
-        lambda: propagate_satellites_loop(satellite_records, _set_satellite_state)))
+        lambda: propagate_satellites_loop(store, satellite_records, _set_satellite_state)))
     quake_task = asyncio.create_task(resilient_task(
-        "refresh_earthquakes", lambda: refresh_earthquakes(earthquake_state)))
+        "refresh_earthquakes", lambda: refresh_earthquakes(store, earthquake_state)))
     ship_task = asyncio.create_task(resilient_task(
         "refresh_ships",
-        lambda: refresh_ships(config, ship_state, has_active_viewer)))
+        lambda: refresh_ships(store, ship_state, has_active_viewer)))
     gpsjam_task = asyncio.create_task(resilient_task(
-        "refresh_gpsjam", lambda: refresh_gpsjam(gpsjam_state)))
-    log.info("Skywatch started on port %d (source: airplanes.live)", config.port)
+        "refresh_gpsjam", lambda: refresh_gpsjam(store, gpsjam_state)))
+    log.info("Skywatch started on port %d (source: airplanes.live)", store.port)
     yield
     for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task]:
         t.cancel()
@@ -272,4 +239,4 @@ def shutdown(sig, frame):
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
-    uvicorn.run(app, host=config.host, port=config.port, log_level="warning")
+    uvicorn.run(app, host=store.host, port=store.port, log_level="warning")

@@ -2,27 +2,18 @@ import re
 
 import pytest
 
-from skywatch import Config
+from config_store import ConfigStore
 from feeds.aircraft import decode_airline, parse_v2_aircraft
 
 
 # --- Config ---
 
-def test_config_loads_defaults(tmp_path):
+def test_config_store_loads_top_level(tmp_path):
     cfg = tmp_path / "config.yaml"
-    cfg.write_text("server:\n  port: 9999\n")
-    import yaml
-    raw = yaml.safe_load(cfg.read_text())
-    assert raw["server"]["port"] == 9999
-
-
-def test_config_polling_defaults(tmp_path):
-    cfg = tmp_path / "config.yaml"
-    cfg.write_text("server:\n  port: 8078\n")
-    import yaml
-    raw = yaml.safe_load(cfg.read_text())
-    polling = raw.get("polling", {})
-    assert polling.get("interval", 15) == 15
+    cfg.write_text("server:\n  port: 9999\npolling:\n  interval: 30\n")
+    store = ConfigStore.load(config_path=cfg, runtime_path=tmp_path / "runtime-config.yaml")
+    assert store.port == 9999
+    assert store.poll_interval == 30
 
 
 # --- v2 Aircraft parsing ---
