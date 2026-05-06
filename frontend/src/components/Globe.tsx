@@ -28,22 +28,17 @@ const darkBaseTiles = new UrlTemplateImageryProvider({
   credit: 'CARTO / OSM',
 });
 
-// Dark mode labels (CARTO dark labels — subtle, thin, multi-language)
-const darkLabelTiles = new UrlTemplateImageryProvider({
+// CARTO labels — thin sans-serif, country/city only at z≥3.
+// At z=0–2 CARTO renders multi-language continent labels ("AFRIKA / أفريقيا"),
+// so we cap minimumLevel to skip those tiles entirely.
+const labelTiles = new UrlTemplateImageryProvider({
   url: 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
   subdomains: ['a', 'b', 'c', 'd'],
+  minimumLevel: 3,
   maximumLevel: 18,
   tileWidth: 512,
   tileHeight: 512,
   credit: 'CARTO / OSM',
-});
-
-// English-only label overlay for satellite mode. ESRI's reference layer
-// renders boundaries + place names in English at every zoom.
-const esriEnglishLabelTiles = new UrlTemplateImageryProvider({
-  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-  maximumLevel: 19,
-  credit: 'Esri',
 });
 
 export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps) {
@@ -142,25 +137,16 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
     layers.removeAll();
 
     if (style === 'dark') {
-      // Dark base + Bing road overlay for English labels/borders
       layers.addImageryProvider(darkBaseTiles);
-      try {
-        const bingRoad = await IonImageryProvider.fromAssetId(4);
-        const roadLayer = layers.addImageryProvider(bingRoad);
-        roadLayer.alpha = 0.2;
-      } catch (e) {
-        console.error('[Skywatch] Failed to load Bing road overlay:', e);
-      }
+      layers.addImageryProvider(labelTiles);
     } else {
-      // ESRI World Imagery (no baked-in labels) + ESRI English-only place
-      // labels. CARTO label tiles include localized continent names like
-      // "AFRIKA / أفريقيا"; ESRI's reference layer is English-only.
+      // ESRI World Imagery (label-free) + CARTO labels overlay.
       layers.addImageryProvider(new UrlTemplateImageryProvider({
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         maximumLevel: 19,
         credit: 'Esri',
       }));
-      layers.addImageryProvider(esriEnglishLabelTiles);
+      layers.addImageryProvider(labelTiles);
     }
     // Keep night side lighter so labels stay readable
     for (let i = 0; i < layers.length; i++) { layers.get(i).nightAlpha = 0.55; }
