@@ -12,6 +12,7 @@
     "cesium": "^1.138.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-router-dom": "^7.15.0",
     "resium": "^1.19.4"
   },
   "devDependencies": {

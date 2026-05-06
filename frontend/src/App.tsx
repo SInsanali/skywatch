@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Viewer as CesiumViewer, Cartesian3, Math as CesiumMath, Rectangle } from 'cesium';
 import Globe, { MapStyle } from './components/Globe';
+import SettingsPage from './pages/SettingsPage';
 import FlightLayer from './components/FlightLayer';
 import AltitudeIndicator from './components/AltitudeIndicator';
 import SatelliteLayer from './components/SatelliteLayer';
@@ -31,7 +33,7 @@ function loadPrefs(): Record<string, any> {
   try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; }
 }
 
-export default function App() {
+function GlobeView() {
   const [prefs] = useState(loadPrefs);
   const [filters, setFilters] = useState<Record<AircraftCategory, boolean>>(
     prefs.filters ?? { airline: true, private: true, military: true, ground: true },
@@ -241,5 +243,16 @@ export default function App() {
         ))}
       </div>
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<GlobeView />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
