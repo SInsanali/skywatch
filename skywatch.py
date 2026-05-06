@@ -24,7 +24,6 @@ from feeds.satellites import refresh_tles, propagate_satellites_loop
 from feeds.earthquakes import refresh_earthquakes
 from feeds.ships import refresh_ships
 from feeds.jamming import refresh_gpsjam
-from feeds.eonet import refresh_eonet
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,7 +92,6 @@ earthquake_state = {}  # cached USGS GeoJSON
 ship_state = {"ships": [], "timestamp": 0}  # cached AIS ship data
 jamming_state = {"zones": [], "timestamp": 0}  # GPS jamming detection grid
 gpsjam_state = []  # cached GPSJam.org daily zones
-eonet_state = []  # cached NASA EONET events
 
 
 def has_active_viewer():
@@ -140,13 +138,11 @@ async def lifespan(app):
         lambda: refresh_ships(store, ship_state, has_active_viewer)))
     gpsjam_task = asyncio.create_task(resilient_task(
         "refresh_gpsjam", lambda: refresh_gpsjam(store, gpsjam_state)))
-    eonet_task = asyncio.create_task(resilient_task(
-        "refresh_eonet", lambda: refresh_eonet(store, eonet_state)))
     log.info("Skywatch started on port %d (source: airplanes.live)", store.port)
     yield
-    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task, eonet_task]:
+    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task]:
         t.cancel()
-    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task, eonet_task]:
+    for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task]:
         try:
             await t
         except asyncio.CancelledError:
@@ -199,7 +195,6 @@ async def health():
         "ships_tracked": len(ship_state.get("ships", [])),
         "jamming_zones": len(jamming_state.get("zones", [])),
         "gpsjam_zones": len(gpsjam_state),
-        "eonet_count": len(eonet_state),
         "has_active_viewer": has_active_viewer(),
     }
 
@@ -223,11 +218,6 @@ async def get_ships():
 async def get_jamming():
     combined = jamming_state.get("zones", []) + gpsjam_state
     return {"zones": combined, "timestamp": jamming_state.get("timestamp", 0)}
-
-
-@app.get("/api/eonet")
-async def get_eonet():
-    return {"events": eonet_state}
 
 
 class FeedUpdate(BaseModel):

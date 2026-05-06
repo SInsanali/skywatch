@@ -16,14 +16,14 @@ def test_load_defaults_only(tmp_path):
         "feeds": {
             "aircraft": {"enabled": True, "interval": 15, "fixed": True},
             "earthquakes": {"enabled": True, "interval": 300},
-            "eonet": {"enabled": False, "interval": 1800},
+            "ships": {"enabled": False, "interval": 60},
         },
     })
     store = ConfigStore.load(config_path=cfg)
     assert store.get("aircraft").enabled is True
     assert store.get("aircraft").interval_seconds == 15
     assert store.get("aircraft").fixed is True
-    assert store.get("eonet").enabled is False
+    assert store.get("ships").enabled is False
     assert store.poll_interval == 15
     assert store.port == 8078
 

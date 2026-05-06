@@ -8,7 +8,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 const mockConfig = {
   feeds: [
     { name: 'aircraft', enabled: true, interval_seconds: 15, fixed: true, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
-    { name: 'eonet', enabled: false, interval_seconds: 1800, fixed: false, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
+    { name: 'earthquakes', enabled: false, interval_seconds: 1800, fixed: false, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
   ],
   server: { host: '0.0.0.0', port: 8078 },
 };
@@ -19,7 +19,7 @@ describe('SettingsPage', () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     await waitFor(() => {
       expect(screen.getByText('aircraft')).toBeTruthy();
-      expect(screen.getByText('eonet')).toBeTruthy();
+      expect(screen.getByText('earthquakes')).toBeTruthy();
     });
   });
 

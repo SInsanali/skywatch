@@ -19,4 +19,3 @@ feeds:
   earthquakes: {enabled: true,  interval: 300,   fixed: false, needs_key: false}
   ships:       {enabled: true,  interval: 60,    fixed: false, needs_key: true}
   gpsjam:      {enabled: true,  interval: 21600, fixed: false, needs_key: false}
-  eonet:       {enabled: false, interval: 1800,  fixed: false, needs_key: false}

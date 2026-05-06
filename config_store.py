@@ -14,7 +14,6 @@ DEFAULT_FEEDS = {
     "earthquakes": {"enabled": True,  "interval": 300,   "fixed": False, "needs_key": False},
     "ships":       {"enabled": True,  "interval": 60,    "fixed": False, "needs_key": True},
     "gpsjam":      {"enabled": True,  "interval": 21600, "fixed": False, "needs_key": False},
-    "eonet":       {"enabled": False, "interval": 1800,  "fixed": False, "needs_key": False},
 }
 
 

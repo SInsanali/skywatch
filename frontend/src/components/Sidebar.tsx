@@ -58,9 +58,6 @@ interface SidebarProps {
   showJamming: boolean;
   onJammingChange: (val: boolean) => void;
   jammingCount: number;
-  showEonet: boolean;
-  onEonetChange: (val: boolean) => void;
-  eonetCount: number;
   showSatFootprint: boolean;
   onSatFootprintChange: (val: boolean) => void;
   satFilters: Record<SatelliteCategory, boolean>;
@@ -196,7 +193,6 @@ export default function Sidebar({
   satelliteCount, earthquakeCount,
   selectedSat, selectedQuake, selectedShip,
   showShips, onShipsChange, shipCount, showJamming, onJammingChange, jammingCount,
-  showEonet, onEonetChange, eonetCount,
   showSatFootprint, onSatFootprintChange,
   satFilters, onSatFilterChange, satCategoryCounts,
   nearbySats, onSelectSat, onFlyToRegion,
@@ -500,14 +496,6 @@ export default function Sidebar({
           <span style={{ ...styles.dot, background: '#ef5350' }} />
           <span style={styles.filterLabel}>GPS Jamming</span>
           <span style={styles.filterCount}>{jammingCount}</span>
-        </div>
-
-        {/* Natural Events (EONET) */}
-        <div style={styles.filterRow}>
-          <input type="checkbox" checked={showEonet} onChange={e => onEonetChange(e.target.checked)} style={styles.checkbox} />
-          <span style={{ ...styles.dot, background: '#ff5722' }} />
-          <span style={styles.filterLabel}>Natural Events</span>
-          <span style={styles.filterCount}>{eonetCount}</span>
         </div>
       </div>
 

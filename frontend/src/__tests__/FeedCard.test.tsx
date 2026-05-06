@@ -6,7 +6,7 @@ import type { FeedConfig } from '../hooks/useConfig';
 afterEach(() => { vi.restoreAllMocks(); });
 
 const baseFeed: FeedConfig = {
-  name: 'eonet', enabled: false, interval_seconds: 1800,
+  name: 'earthquakes', enabled: false, interval_seconds: 1800,
   fixed: false, needs_key: false, has_api_key: false,
   api_key_masked: null, last_error: null,
 };
@@ -14,7 +14,7 @@ const baseFeed: FeedConfig = {
 describe('FeedCard', () => {
   it('renders feed name', () => {
     render(<FeedCard feed={baseFeed} onSave={vi.fn()} />);
-    expect(screen.getByText(/eonet/i)).toBeTruthy();
+    expect(screen.getByText(/earthquakes/i)).toBeTruthy();
   });
 
   it('calls onSave with toggled enabled when Save clicked after toggling', () => {
@@ -23,7 +23,7 @@ describe('FeedCard', () => {
     const toggle = screen.getByRole('checkbox', { name: /enabled/i });
     fireEvent.click(toggle);
     fireEvent.click(screen.getByRole('button', { name: /save/i }));
-    expect(onSave).toHaveBeenCalledWith('eonet', expect.objectContaining({ enabled: true }));
+    expect(onSave).toHaveBeenCalledWith('earthquakes', expect.objectContaining({ enabled: true }));
   });
 
   it('disables enabled toggle when feed.fixed is true', () => {

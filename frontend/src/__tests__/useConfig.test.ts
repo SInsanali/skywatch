@@ -9,7 +9,7 @@ afterEach(() => {
 const mockConfigResponse = {
   feeds: [
     { name: 'aircraft', enabled: true, interval_seconds: 15, fixed: true, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
-    { name: 'eonet', enabled: false, interval_seconds: 1800, fixed: false, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
+    { name: 'earthquakes', enabled: false, interval_seconds: 1800, fixed: false, needs_key: false, has_api_key: false, api_key_masked: null, last_error: null },
   ],
   server: { host: '0.0.0.0', port: 8078 },
 };
@@ -36,12 +36,12 @@ describe('useConfig', () => {
     await waitFor(() => expect(result.current.feeds.length).toBe(2));
 
     await act(async () => {
-      await result.current.updateFeed('eonet', { enabled: true });
+      await result.current.updateFeed('earthquakes', { enabled: true });
     });
 
     const putCall = fetchMock.mock.calls.find(c => (c[1] as any)?.method === 'PUT');
     expect(putCall).toBeTruthy();
-    expect(putCall![0]).toBe('/api/config/eonet');
+    expect(putCall![0]).toBe('/api/config/earthquakes');
     expect(JSON.parse((putCall![1] as any).body)).toEqual({ enabled: true });
   });
 
@@ -56,7 +56,7 @@ describe('useConfig', () => {
     let caught: Error | null = null;
     await act(async () => {
       try {
-        await result.current.updateFeed('eonet', { interval: 1 });
+        await result.current.updateFeed('earthquakes', { interval: 1 });
       } catch (e) {
         caught = e as Error;
       }

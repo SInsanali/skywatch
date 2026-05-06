@@ -90,7 +90,7 @@ def test_get_config_returns_feeds(client):
     body = resp.json()
     assert "feeds" in body
     names = [f["name"] for f in body["feeds"]]
-    for expected in ["aircraft", "satellites", "earthquakes", "ships", "gpsjam", "eonet"]:
+    for expected in ["aircraft", "satellites", "earthquakes", "ships", "gpsjam"]:
         assert expected in names
     aircraft = next(f for f in body["feeds"] if f["name"] == "aircraft")
     assert aircraft["fixed"] is True
@@ -126,11 +126,3 @@ def test_put_config_validates_interval(client):
 def test_put_config_rejects_disabling_fixed_feed(client):
     resp = client.put("/api/config/aircraft", json={"enabled": False})
     assert resp.status_code == 400
-
-
-def test_get_eonet_returns_list(client):
-    resp = client.get("/api/eonet")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "events" in body
-    assert isinstance(body["events"], list)
