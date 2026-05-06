@@ -8,6 +8,7 @@ services:
       - TZ=UTC
     volumes:
       - ./secrets.yaml:/app/secrets.yaml:ro
+      - ./runtime-config.yaml:/app/runtime-config.yaml
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8078/api/health"]
