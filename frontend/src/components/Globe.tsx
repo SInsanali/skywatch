@@ -144,19 +144,15 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         console.error('[Skywatch] Failed to load Bing road overlay:', e);
       }
     } else {
-      // Bing Aerial (no labels) + CARTO English label overlay — Bing's
-      // built-in labels (asset 3) are multi-language; CARTO is English only.
-      try {
-        const bingAerial = await IonImageryProvider.fromAssetId(2);
-        layers.addImageryProvider(bingAerial);
-      } catch (e) {
-        console.error('[Skywatch] Failed to load Bing satellite imagery, using ESRI fallback:', e);
-        layers.addImageryProvider(new UrlTemplateImageryProvider({
-          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-          maximumLevel: 19,
-          credit: 'Esri',
-        }));
-      }
+      // ESRI World Imagery (no baked-in labels at any zoom) + CARTO English
+      // label overlay. Bing aerial assets (2 and 3) ship continent/country
+      // labels rendered into the tiles in multiple languages, which we don't
+      // want.
+      layers.addImageryProvider(new UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        maximumLevel: 19,
+        credit: 'Esri',
+      }));
       layers.addImageryProvider(darkLabelTiles);
     }
     // Keep night side lighter so labels stay readable
