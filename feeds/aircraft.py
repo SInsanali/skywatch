@@ -110,7 +110,7 @@ async def load_aircraft_db(aircraft_db):
         log.error("Failed to load aircraft database: %s", e)
 
 
-async def refresh_aircraft_db(aircraft_db):
+async def refresh_aircraft_db(store, aircraft_db):
     await load_aircraft_db(aircraft_db)
     while True:
         await asyncio.sleep(ACDB_REFRESH_HOURS * 3600)
@@ -237,16 +237,18 @@ def parse_v2_aircraft(ac_list, aircraft_db, airline_db):
     return aircraft
 
 
-async def poll_aircraft(config, aircraft_state, aircraft_db, airline_db,
+async def poll_aircraft(store, aircraft_state, aircraft_db, airline_db,
                         jamming_state, has_active_viewer):
     from feeds.jamming import compute_jamming_grid
     import asyncio
 
-    interval = config.poll_interval
     was_idle = True
 
-    async with httpx.AsyncClient(timeout=config.timeout) as client:
+    async with httpx.AsyncClient(timeout=store.timeout) as client:
         while True:
+            feed = store.get("aircraft")
+            interval = feed.interval_seconds
+
             if not has_active_viewer():
                 if not was_idle:
                     log.info("No active viewers, pausing polling")

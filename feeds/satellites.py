@@ -154,20 +154,28 @@ def propagate_satellites(satellite_records):
     return results
 
 
-async def refresh_tles(satellite_records):
+async def refresh_tles(store, satellite_records):
     """Periodically re-fetch TLEs from CelesTrak."""
-    await fetch_tles(satellite_records)
     while True:
-        await asyncio.sleep(TLE_REFRESH_HOURS * 3600)
+        feed = store.get("satellites")
+        if not feed.enabled:
+            await asyncio.sleep(5)
+            continue
         await fetch_tles(satellite_records)
+        # TLE refresh cadence is fixed at 6h regardless of propagation tick
+        await asyncio.sleep(TLE_REFRESH_HOURS * 3600)
 
 
-async def propagate_satellites_loop(satellite_records, set_satellite_state):
+async def propagate_satellites_loop(store, satellite_records, set_satellite_state):
     """Propagate satellite positions every few seconds."""
     while True:
+        feed = store.get("satellites")
+        if not feed.enabled:
+            await asyncio.sleep(5)
+            continue
         if satellite_records:
             result = await asyncio.get_event_loop().run_in_executor(
                 None, propagate_satellites, satellite_records
             )
             set_satellite_state(result)
-        await asyncio.sleep(SAT_PROPAGATE_INTERVAL)
+        await asyncio.sleep(feed.interval_seconds)

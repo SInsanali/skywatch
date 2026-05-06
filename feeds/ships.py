@@ -31,22 +31,23 @@ def classify_ship_type(ais_type):
     return "other"
 
 
-async def collect_ais_burst(config, ship_state):
+async def collect_ais_burst(store, ship_state):
     """Connect to AISStream WebSocket, collect ship data for a burst duration."""
-    if not config.ais_api_key:
+    feed = store.get("ships")
+    if not feed.api_key:
         return
 
     ships = {}
     try:
         async with websockets.connect(AISSTREAM_WS_URL) as ws:
             sub = json.dumps({
-                "APIKey": config.ais_api_key,
+                "APIKey": feed.api_key,
                 "BoundingBoxes": [[[-90, -180], [90, 180]]],
                 "FilterMessageTypes": ["PositionReport", "ShipStaticData"],
             })
             await ws.send(sub)
 
-            deadline = time.time() + config.ais_burst_duration
+            deadline = time.time() + store.ais_burst_duration
             while time.time() < deadline:
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=2)
@@ -117,14 +118,13 @@ async def collect_ais_burst(config, ship_state):
     log.info("AIS burst: %d total, %d moving ships", len(ships), len(moving))
 
 
-async def refresh_ships(config, ship_state, has_active_viewer):
+async def refresh_ships(store, ship_state, has_active_viewer):
     """Periodically collect AIS ship data."""
-    if not config.ais_api_key:
-        log.info("No AISStream API key configured, skipping ship tracking")
-        return
-    # First burst immediately on startup
-    await collect_ais_burst(config, ship_state)
     while True:
-        await asyncio.sleep(config.ais_cache_ttl)
+        feed = store.get("ships")
+        if not feed.enabled or not feed.api_key:
+            await asyncio.sleep(5)
+            continue
         if has_active_viewer():
-            await collect_ais_burst(config, ship_state)
+            await collect_ais_burst(store, ship_state)
+        await asyncio.sleep(feed.interval_seconds)

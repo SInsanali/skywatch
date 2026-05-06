@@ -118,8 +118,11 @@ async def fetch_gpsjam(gpsjam_state):
     log.error("Could not fetch GPSJam data for today or yesterday")
 
 
-async def refresh_gpsjam(gpsjam_state):
-    await fetch_gpsjam(gpsjam_state)
+async def refresh_gpsjam(store, gpsjam_state):
     while True:
-        await asyncio.sleep(GPSJAM_REFRESH_HOURS * 3600)
+        feed = store.get("gpsjam")
+        if not feed.enabled:
+            await asyncio.sleep(5)
+            continue
         await fetch_gpsjam(gpsjam_state)
+        await asyncio.sleep(feed.interval_seconds)
