@@ -126,3 +126,11 @@ def test_put_config_validates_interval(client):
 def test_put_config_rejects_disabling_fixed_feed(client):
     resp = client.put("/api/config/aircraft", json={"enabled": False})
     assert resp.status_code == 400
+
+
+def test_get_eonet_returns_list(client):
+    resp = client.get("/api/eonet")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "events" in body
+    assert isinstance(body["events"], list)
