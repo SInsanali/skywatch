@@ -14,6 +14,8 @@ import { useSatellites, Satellite } from './hooks/useSatellites';
 import { useEarthquakes, Earthquake } from './hooks/useEarthquakes';
 import { useShips, Ship } from './hooks/useShips';
 import { useJamming } from './hooks/useJamming';
+import { useEonet } from './hooks/useEonet';
+import EonetLayer from './components/EonetLayer';
 import ShipLayer from './components/ShipLayer';
 import { Aircraft, AircraftCategory } from './types';
 
@@ -50,6 +52,7 @@ function GlobeView() {
   const [showShips, setShowShips] = useState(prefs.showShips ?? true);
   const [showJamming, setShowJamming] = useState(prefs.showJamming ?? true);
   const [showSatFootprint, setShowSatFootprint] = useState(prefs.showSatFootprint ?? true);
+  const [showEonet, setShowEonet] = useState(prefs.showEonet ?? true);
   const [satFilters, setSatFilters] = useState<Record<SatelliteCategory, boolean>>(
     prefs.satFilters ?? { earthObs: true, comms: true, nav: true, science: true, stations: true, military: true },
   );
@@ -61,15 +64,16 @@ function GlobeView() {
   const earthquakes = useEarthquakes(showEarthquakes);
   const ships = useShips(showShips);
   const jammingZones = useJamming(showJamming);
+  const eonetEvents = useEonet(showEonet);
 
   useEffect(() => {
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify({
         filters, satFilters, mapStyle,
-        showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint,
+        showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint, showEonet,
       }));
     } catch {}
-  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint]);
+  }, [filters, satFilters, mapStyle, showAircraft, showTrails, showSatellites, showEarthquakes, showShips, showJamming, showSatFootprint, showEonet]);
 
   const visibleSatellites = useMemo(
     () => satellites.filter(s => {
@@ -182,6 +186,7 @@ function GlobeView() {
         {showEarthquakes && <EarthquakeLayer earthquakes={earthquakes} onSelect={handleSelectQuake} />}
         {showShips && <ShipLayer ships={ships} selected={selectedShip} onSelect={handleSelectShip} />}
         {showJamming && <JammingLayer zones={jammingZones} />}
+        {showEonet && <EonetLayer events={eonetEvents} />}
       </Globe>
       <Sidebar
         flights={flights}

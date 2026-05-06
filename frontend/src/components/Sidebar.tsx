@@ -226,11 +226,14 @@ export default function Sidebar({
     <div style={styles.sidebar}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={styles.brand}>Sky<span style={{ color: '#4a90d9' }}>watch</span></div>
-        <button
-          onClick={() => onFlyToRegion('global')}
-          title="Reset view"
-          style={styles.resetBtn}
-        >&#8962;</button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <a href="/settings" title="Settings" style={{ ...styles.resetBtn, textDecoration: 'none' } as React.CSSProperties}>&#9881;</a>
+          <button
+            onClick={() => onFlyToRegion('global')}
+            title="Reset view"
+            style={styles.resetBtn}
+          >&#8962;</button>
+        </div>
       </div>
 
       {/* Search */}
