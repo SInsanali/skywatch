@@ -28,7 +28,7 @@ const darkBaseTiles = new UrlTemplateImageryProvider({
   credit: 'CARTO / OSM',
 });
 
-// Dark mode labels (CARTO dark labels — subtle, thin)
+// Dark mode labels (CARTO dark labels — subtle, thin, multi-language)
 const darkLabelTiles = new UrlTemplateImageryProvider({
   url: 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}@2x.png',
   subdomains: ['a', 'b', 'c', 'd'],
@@ -36,6 +36,14 @@ const darkLabelTiles = new UrlTemplateImageryProvider({
   tileWidth: 512,
   tileHeight: 512,
   credit: 'CARTO / OSM',
+});
+
+// English-only label overlay for satellite mode. ESRI's reference layer
+// renders boundaries + place names in English at every zoom.
+const esriEnglishLabelTiles = new UrlTemplateImageryProvider({
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  maximumLevel: 19,
+  credit: 'Esri',
 });
 
 export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps) {
@@ -144,16 +152,15 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         console.error('[Skywatch] Failed to load Bing road overlay:', e);
       }
     } else {
-      // ESRI World Imagery (no baked-in labels at any zoom) + CARTO English
-      // label overlay. Bing aerial assets (2 and 3) ship continent/country
-      // labels rendered into the tiles in multiple languages, which we don't
-      // want.
+      // ESRI World Imagery (no baked-in labels) + ESRI English-only place
+      // labels. CARTO label tiles include localized continent names like
+      // "AFRIKA / أفريقيا"; ESRI's reference layer is English-only.
       layers.addImageryProvider(new UrlTemplateImageryProvider({
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
         maximumLevel: 19,
         credit: 'Esri',
       }));
-      layers.addImageryProvider(darkLabelTiles);
+      layers.addImageryProvider(esriEnglishLabelTiles);
     }
     // Keep night side lighter so labels stay readable
     for (let i = 0; i < layers.length; i++) { layers.get(i).nightAlpha = 0.55; }
