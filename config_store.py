@@ -179,6 +179,10 @@ class ConfigStore:
         last4 = key[-4:] if len(key) >= 4 else key
         return "••••" + last4
 
+    def record_error(self, name: str, msg: str | None):
+        if name in self.feeds:
+            self.feeds[name].last_error = msg
+
     def to_public_dict(self) -> dict:
         feeds_out = []
         for name, feed in self.feeds.items():

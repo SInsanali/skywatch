@@ -126,3 +126,19 @@ def test_to_public_dict_no_key_set(tmp_path):
     ships = next(f for f in pub["feeds"] if f["name"] == "ships")
     assert ships["api_key_masked"] is None
     assert ships["has_api_key"] is False
+
+
+def test_record_error_sets_last_error(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    write_yaml(cfg, {"feeds": {"earthquakes": {"enabled": True, "interval": 300}}})
+    store = ConfigStore.load(config_path=cfg, runtime_path=tmp_path / "runtime-config.yaml")
+
+    store.record_error("earthquakes", "HTTP 503 from USGS")
+    assert store.get("earthquakes").last_error == "HTTP 503 from USGS"
+
+    store.record_error("earthquakes", None)
+    assert store.get("earthquakes").last_error is None
+
+    pub = store.to_public_dict()
+    eq = next(f for f in pub["feeds"] if f["name"] == "earthquakes")
+    assert eq["last_error"] is None
