@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Aircraft, AircraftCategory, classifyAircraft, categoryColors, typeName } from '../types';
 import { MapStyle } from './Globe';
 import { Satellite } from '../hooks/useSatellites';
@@ -227,7 +228,7 @@ export default function Sidebar({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={styles.brand}>Sky<span style={{ color: '#4a90d9' }}>watch</span></div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <a href="/settings" title="Settings" style={{ ...styles.resetBtn, textDecoration: 'none' } as React.CSSProperties}>&#9881;</a>
+          <Link to="/settings" title="Settings" style={{ ...styles.resetBtn, textDecoration: 'none' } as React.CSSProperties}>&#9881;</Link>
           <button
             onClick={() => onFlyToRegion('global')}
             title="Reset view"

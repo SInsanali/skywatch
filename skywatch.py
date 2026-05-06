@@ -262,7 +262,16 @@ async def heartbeat():
 
 static_dir = Path(__file__).parent / "static"
 if static_dir.is_dir():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True))
+    # SPA fallback: routes like /settings should serve index.html so React
+    # Router can take over. Anything under /api/ is handled above; everything
+    # else falls through to here.
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str):
+        from fastapi.responses import FileResponse
+        target = static_dir / full_path
+        if full_path and target.is_file():
+            return FileResponse(target)
+        return FileResponse(static_dir / "index.html")
 
 
 def shutdown(sig, frame):
