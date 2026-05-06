@@ -23,7 +23,11 @@ export default function SettingsPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  page: { minHeight: '100vh', background: '#0a0e14', color: '#b0b8c4', fontFamily: '-apple-system, sans-serif', padding: 24 },
+  page: {
+    position: 'fixed', inset: 0, overflowY: 'auto',
+    background: '#0a0e14', color: '#b0b8c4',
+    fontFamily: '-apple-system, sans-serif', padding: 24,
+  },
   header: { display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 },
   back: { color: '#4a90d9', textDecoration: 'none', fontSize: 13 },
   title: { margin: 0, fontSize: 22, fontWeight: 700, color: '#f0c040' },

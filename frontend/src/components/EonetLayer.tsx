@@ -1,27 +1,27 @@
 import { Entity } from 'resium';
-import { Cartesian3, Color, LabelStyle, VerticalOrigin } from 'cesium';
+import { Cartesian3, Color } from 'cesium';
 import type { EonetEvent } from '../hooks/useEonet';
 
 interface Props {
   events: EonetEvent[];
 }
 
-const CATEGORY_EMOJI: Record<string, string> = {
-  wildfires: '🔥',
-  severeStorms: '🌀',
-  volcanoes: '🌋',
-  seaLakeIce: '🧊',
-  earthquakes: '〰️',
-  drought: '🌵',
-  dustHaze: '🌫️',
-  manmade: '🏭',
-  snow: '❄️',
-  waterColor: '🌊',
-  landslides: '⛰️',
-  tempExtremes: '🌡️',
+const CATEGORY_COLORS: Record<string, string> = {
+  wildfires: '#ff5722',
+  severeStorms: '#29b6f6',
+  volcanoes: '#ff9800',
+  seaLakeIce: '#90caf9',
+  earthquakes: '#ffb74d',
+  drought: '#fbc02d',
+  dustHaze: '#bcaaa4',
+  manmade: '#9e9e9e',
+  snow: '#e0e0e0',
+  waterColor: '#26a69a',
+  landslides: '#a1887f',
+  tempExtremes: '#ef5350',
 };
 
-const DEFAULT_EMOJI = '❓';
+const DEFAULT_COLOR = '#ff5722';
 
 function latestPoint(ev: EonetEvent): [number, number] | null {
   for (let i = ev.geometry.length - 1; i >= 0; i--) {
@@ -40,19 +40,16 @@ export default function EonetLayer({ events }: Props) {
         const pt = latestPoint(ev);
         if (!pt) return null;
         const [lon, lat] = pt;
-        const emoji = CATEGORY_EMOJI[ev.category] || DEFAULT_EMOJI;
+        const color = CATEGORY_COLORS[ev.category] || DEFAULT_COLOR;
         return (
           <Entity
             key={ev.id}
             position={Cartesian3.fromDegrees(lon, lat)}
-            label={{
-              text: emoji,
-              font: '20px sans-serif',
-              style: LabelStyle.FILL,
-              fillColor: Color.WHITE,
-              verticalOrigin: VerticalOrigin.CENTER,
-              showBackground: false,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            point={{
+              pixelSize: 8,
+              color: Color.fromCssColorString(color),
+              outlineColor: Color.WHITE,
+              outlineWidth: 1,
             }}
             description={`${ev.title} (${ev.category}) — last seen ${ev.last_update}`}
           />
