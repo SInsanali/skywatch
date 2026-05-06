@@ -82,3 +82,47 @@ def test_static_index_served(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "Skywatch" in resp.text
+
+
+def test_get_config_returns_feeds(client):
+    resp = client.get("/api/config")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "feeds" in body
+    names = [f["name"] for f in body["feeds"]]
+    for expected in ["aircraft", "satellites", "earthquakes", "ships", "gpsjam", "eonet"]:
+        assert expected in names
+    aircraft = next(f for f in body["feeds"] if f["name"] == "aircraft")
+    assert aircraft["fixed"] is True
+    assert "api_key" not in aircraft  # raw key never exposed
+    assert "api_key_masked" in aircraft
+
+
+def test_put_config_updates_feed(client):
+    from skywatch import store
+    original = store.get("earthquakes").interval_seconds
+    try:
+        resp = client.put("/api/config/earthquakes", json={"interval": 600})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert store.get("earthquakes").interval_seconds == 600
+    finally:
+        # Reset
+        import asyncio
+        asyncio.run(store.update("earthquakes", {"interval": original}))
+
+
+def test_put_config_rejects_unknown_feed(client):
+    resp = client.put("/api/config/nonexistent", json={"enabled": False})
+    assert resp.status_code == 404
+
+
+def test_put_config_validates_interval(client):
+    resp = client.put("/api/config/earthquakes", json={"interval": 1})
+    assert resp.status_code == 400
+
+
+def test_put_config_rejects_disabling_fixed_feed(client):
+    resp = client.put("/api/config/aircraft", json={"enabled": False})
+    assert resp.status_code == 400

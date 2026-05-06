@@ -8,9 +8,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from config_store import ConfigStore
 from feeds.aircraft import (
@@ -217,6 +218,29 @@ async def get_ships():
 async def get_jamming():
     combined = jamming_state.get("zones", []) + gpsjam_state
     return {"zones": combined, "timestamp": jamming_state.get("timestamp", 0)}
+
+
+class FeedUpdate(BaseModel):
+    enabled: bool | None = None
+    interval: int | None = None
+    api_key: str | None = None
+
+
+@app.get("/api/config")
+async def get_config():
+    return store.to_public_dict()
+
+
+@app.put("/api/config/{feed_name}")
+async def put_config(feed_name: str, body: FeedUpdate):
+    if feed_name not in store.feeds:
+        raise HTTPException(status_code=404, detail=f"Unknown feed: {feed_name}")
+    partial = body.model_dump(exclude_none=True)
+    try:
+        result = await store.update(feed_name, partial)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return result
 
 
 @app.post("/api/heartbeat")
