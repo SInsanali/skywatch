@@ -144,20 +144,20 @@ export default function Globe({ mapStyle, onViewerReady, children }: GlobeProps)
         console.error('[Skywatch] Failed to load Bing road overlay:', e);
       }
     } else {
-      // Bing Maps Aerial with Labels (Ion asset 3) — clean, Google Earth quality
+      // Bing Aerial (no labels) + CARTO English label overlay — Bing's
+      // built-in labels (asset 3) are multi-language; CARTO is English only.
       try {
-        const bingLabeled = await IonImageryProvider.fromAssetId(3);
-        layers.addImageryProvider(bingLabeled);
+        const bingAerial = await IonImageryProvider.fromAssetId(2);
+        layers.addImageryProvider(bingAerial);
       } catch (e) {
-        console.error('[Skywatch] Failed to load Bing satellite imagery, using fallback:', e);
-        // Fallback: ESRI satellite + CARTO labels
+        console.error('[Skywatch] Failed to load Bing satellite imagery, using ESRI fallback:', e);
         layers.addImageryProvider(new UrlTemplateImageryProvider({
           url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           maximumLevel: 19,
           credit: 'Esri',
         }));
-        layers.addImageryProvider(darkLabelTiles);
       }
+      layers.addImageryProvider(darkLabelTiles);
     }
     // Keep night side lighter so labels stay readable
     for (let i = 0; i < layers.length; i++) { layers.get(i).nightAlpha = 0.55; }
