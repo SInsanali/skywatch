@@ -116,3 +116,83 @@ class ConfigStore:
         if name not in self.feeds:
             raise KeyError(f"Unknown feed: {name}")
         return self.feeds[name]
+
+    INTERVAL_MIN = 5
+    INTERVAL_MAX = 86400  # 24 hours
+
+    async def update(self, name: str, partial: dict[str, Any]) -> dict:
+        async with self._lock:
+            if name not in self.feeds:
+                raise KeyError(f"Unknown feed: {name}")
+            feed = self.feeds[name]
+
+            if "enabled" in partial:
+                if feed.fixed and partial["enabled"] is False:
+                    raise ValueError(f"Feed '{name}' is fixed and cannot be disabled")
+            if "interval" in partial or "interval_seconds" in partial:
+                interval = partial.get("interval_seconds", partial.get("interval"))
+                if not isinstance(interval, int) or not (self.INTERVAL_MIN <= interval <= self.INTERVAL_MAX):
+                    raise ValueError(
+                        f"interval must be int in [{self.INTERVAL_MIN}, {self.INTERVAL_MAX}], got {interval!r}"
+                    )
+
+            restart_required: list[str] = []
+            new_enabled = partial.get("enabled", feed.enabled)
+            new_interval = partial.get("interval_seconds", partial.get("interval", feed.interval_seconds))
+            new_api_key = partial.get("api_key", feed.api_key)
+            if new_api_key != feed.api_key:
+                restart_required.append("api_key")
+
+            updated = Feed(
+                name=feed.name,
+                enabled=new_enabled,
+                interval_seconds=new_interval,
+                fixed=feed.fixed,
+                needs_key=feed.needs_key,
+                api_key=new_api_key,
+                last_error=feed.last_error,
+            )
+            self.feeds[name] = updated
+            self._persist_runtime_overlay()
+            return {"ok": True, "restart_required": restart_required}
+
+    def _persist_runtime_overlay(self):
+        if self._runtime_path is None:
+            return
+        out = {"feeds": {}}
+        for name, feed in self.feeds.items():
+            entry = {
+                "enabled": feed.enabled,
+                "interval": feed.interval_seconds,
+            }
+            if feed.api_key is not None:
+                entry["api_key"] = feed.api_key
+            out["feeds"][name] = entry
+        tmp = self._runtime_path.with_suffix(".yaml.tmp")
+        tmp.write_text(yaml.safe_dump(out, sort_keys=True))
+        tmp.replace(self._runtime_path)
+
+    @staticmethod
+    def _mask_key(key: str | None) -> str | None:
+        if not key:
+            return None
+        last4 = key[-4:] if len(key) >= 4 else key
+        return "••••" + last4
+
+    def to_public_dict(self) -> dict:
+        feeds_out = []
+        for name, feed in self.feeds.items():
+            feeds_out.append({
+                "name": feed.name,
+                "enabled": feed.enabled,
+                "interval_seconds": feed.interval_seconds,
+                "fixed": feed.fixed,
+                "needs_key": feed.needs_key,
+                "has_api_key": bool(feed.api_key),
+                "api_key_masked": self._mask_key(feed.api_key),
+                "last_error": feed.last_error,
+            })
+        return {
+            "feeds": feeds_out,
+            "server": {"host": self.host, "port": self.port},
+        }

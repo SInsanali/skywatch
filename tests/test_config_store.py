@@ -59,3 +59,70 @@ def test_unknown_feed_name_raises(tmp_path):
     store = ConfigStore.load(config_path=cfg)
     with pytest.raises(KeyError):
         store.get("not_a_feed")
+
+
+import asyncio
+
+
+def test_update_persists_to_runtime(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    runtime = tmp_path / "runtime-config.yaml"
+    write_yaml(cfg, {
+        "feeds": {"earthquakes": {"enabled": True, "interval": 300}},
+    })
+    store = ConfigStore.load(config_path=cfg, runtime_path=runtime)
+
+    asyncio.run(store.update("earthquakes", {"enabled": False, "interval": 600}))
+
+    assert store.get("earthquakes").enabled is False
+    assert store.get("earthquakes").interval_seconds == 600
+    persisted = yaml.safe_load(runtime.read_text())
+    assert persisted["feeds"]["earthquakes"]["enabled"] is False
+    assert persisted["feeds"]["earthquakes"]["interval"] == 600
+
+
+def test_update_rejects_disabling_fixed_feed(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    write_yaml(cfg, {
+        "feeds": {"aircraft": {"enabled": True, "interval": 15, "fixed": True}},
+    })
+    store = ConfigStore.load(config_path=cfg, runtime_path=tmp_path / "runtime-config.yaml")
+    with pytest.raises(ValueError, match="fixed"):
+        asyncio.run(store.update("aircraft", {"enabled": False}))
+
+
+def test_update_rejects_out_of_range_interval(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    write_yaml(cfg, {"feeds": {"earthquakes": {"enabled": True, "interval": 300}}})
+    store = ConfigStore.load(config_path=cfg, runtime_path=tmp_path / "runtime-config.yaml")
+    with pytest.raises(ValueError, match="interval"):
+        asyncio.run(store.update("earthquakes", {"interval": 1}))
+    with pytest.raises(ValueError, match="interval"):
+        asyncio.run(store.update("earthquakes", {"interval": 99999}))
+
+
+def test_to_public_dict_masks_api_key(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    write_yaml(cfg, {
+        "feeds": {"ships": {"enabled": True, "interval": 60, "needs_key": True}},
+    })
+    secrets = tmp_path / "secrets.yaml"
+    write_yaml(secrets, {"aisstream": {"api_key": "abcdef123456"}})
+    store = ConfigStore.load(config_path=cfg, secrets_path=secrets, runtime_path=tmp_path / "runtime-config.yaml")
+    pub = store.to_public_dict()
+    ships = next(f for f in pub["feeds"] if f["name"] == "ships")
+    assert ships["api_key_masked"] == "••••3456"
+    assert ships["has_api_key"] is True
+    assert "api_key" not in ships  # raw key never exposed
+
+
+def test_to_public_dict_no_key_set(tmp_path):
+    cfg = tmp_path / "config.yaml"
+    write_yaml(cfg, {
+        "feeds": {"ships": {"enabled": True, "interval": 60, "needs_key": True}},
+    })
+    store = ConfigStore.load(config_path=cfg, runtime_path=tmp_path / "runtime-config.yaml")
+    pub = store.to_public_dict()
+    ships = next(f for f in pub["feeds"] if f["name"] == "ships")
+    assert ships["api_key_masked"] is None
+    assert ships["has_api_key"] is False
