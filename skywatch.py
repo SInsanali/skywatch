@@ -138,7 +138,7 @@ async def lifespan(app):
         lambda: refresh_ships(store, ship_state, has_active_viewer)))
     gpsjam_task = asyncio.create_task(resilient_task(
         "refresh_gpsjam", lambda: refresh_gpsjam(store, gpsjam_state)))
-    log.info("Skywatch started on port %d (source: airplanes.live)", store.port)
+    log.info("Skywatch started on port %d (source: adsb.lol)", store.port)
     yield
     for t in [poll_task, db_task, tle_task, sat_task, quake_task, ship_task, gpsjam_task]:
         t.cancel()
@@ -184,7 +184,7 @@ async def health():
     age = time.time() - aircraft_state["timestamp"] if aircraft_state["timestamp"] else None
     return {
         "status": "ok",
-        "source": "airplanes.live",
+        "source": "adsb.lol",
         "aircraft_count": len(aircraft_state["aircraft"]),
         "data_age_seconds": round(age) if age else None,
         "airports_loaded": len(airports),

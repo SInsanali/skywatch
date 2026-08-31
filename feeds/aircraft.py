@@ -9,12 +9,13 @@ import httpx
 
 log = logging.getLogger("skywatch")
 
-ADSBX_BASE = "https://api.airplanes.live/v2"
+ADSBX_BASE = "https://api.adsb.lol/v2"
 ACDB_URL = "https://downloads.adsbexchange.com/downloads/basic-ac-db.json.gz"
 AIRPORTS_URL = "https://davidmegginson.github.io/ourairports-data/airports.csv"
 AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat"
 ACDB_REFRESH_HOURS = 24
 GLOBAL_QUERY_RADIUS = 10000  # nm -- large enough to cover the entire globe
+USER_AGENT = "skywatch/1.0"  # adsb.lol rejects the default python-httpx UA
 
 
 async def load_airlines(airline_db):
@@ -131,7 +132,7 @@ def decode_airline(callsign, airline_db):
 
 
 def parse_v2_aircraft(ac_list, aircraft_db, airline_db):
-    """Parse airplanes.live v2 format into our standard format."""
+    """Parse adsb.lol v2 format into our standard format."""
     aircraft = []
     for a in ac_list:
         lat = a.get("lat")
@@ -244,7 +245,8 @@ async def poll_aircraft(store, aircraft_state, aircraft_db, airline_db,
 
     was_idle = True
 
-    async with httpx.AsyncClient(timeout=store.timeout) as client:
+    async with httpx.AsyncClient(timeout=store.timeout,
+                                 headers={"User-Agent": USER_AGENT}) as client:
         while True:
             feed = store.get("aircraft")
             interval = feed.interval_seconds
@@ -265,11 +267,11 @@ async def poll_aircraft(store, aircraft_state, aircraft_db, airline_db,
                 resp = await client.get(url)
 
                 if resp.status_code == 429:
-                    log.warning("Rate limited by airplanes.live")
+                    log.warning("Rate limited by adsb.lol")
                     await asyncio.sleep(10)
                     continue
                 if resp.status_code != 200:
-                    log.error("HTTP %d from airplanes.live", resp.status_code)
+                    log.error("HTTP %d from adsb.lol", resp.status_code)
                     await asyncio.sleep(interval)
                     continue
 

@@ -71,7 +71,7 @@ def test_health_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "ok"
-    assert data["source"] == "airplanes.live"
+    assert data["source"] == "adsb.lol"
     assert "aircraft_count" in data
     assert "airports_loaded" in data
     assert "aircraft_db_loaded" in data
